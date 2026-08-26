@@ -28,10 +28,21 @@ echo "== reachability =="
 curl -s "http://${HOST_IP}:11434/v1/models" | grep -q "${SLM_CHAT_MODEL%%:*}" && ok "SLM present" || no "SLM present"
 curl -s http://localhost:8090/health | grep -q '"loaded":true' && ok "KG encoder loaded (relex)" || no "KG encoder (relex)"
 
-echo "== login (real OIDC flow, not the service-secret shortcut) =="
-curl -s -X POST "$BASE/auth/login" -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin123!"}' | grep -q '"access_token"' \
-  && ok "UI login (admin)" || no "UI login (admin) — check COOKIE_NAME + OIDC_ISSUER_URL"
+echo "== login (real browser flow over HTTP, not the service-secret shortcut) =="
+# Capture Set-Cookie headers + body so we test what a browser actually gets.
+lg=$(curl -s -D /tmp/smk.login.h -c /tmp/smk.cj -X POST "$BASE/auth/login" \
+  -H "Content-Type: application/json" -d '{"username":"admin","password":"Admin123!"}')
+echo "$lg" | grep -q '"access_token"' && ok "UI login (admin)" || no "UI login (admin) — check COOKIE_NAME + OIDC_ISSUER_URL"
+# Over plain HTTP the session cookie must NOT be Secure, or the browser drops it.
+if grep -iq '^set-cookie' /tmp/smk.login.h; then
+  grep -i '^set-cookie' /tmp/smk.login.h | grep -iq 'Secure' \
+    && no "session cookie is Secure — browser will drop it over HTTP (set NODE_ENV=development or use HTTPS)" \
+    || ok "session cookie usable over HTTP (not Secure)"
+else no "no session cookie set"; fi
+# Full session path a browser walks: /auth/me → an authed API call.
+ tok=$(curl -s -b /tmp/smk.cj "$BASE/auth/me" | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+[ "$(curl -s -b /tmp/smk.cj -H "Authorization: Bearer $tok" -o /dev/null -w '%{http_code}' "$BASE/api/namespace")" = 200 ] \
+  && ok "session flow (/auth/me → /api/namespace)" || no "session flow (/auth/me → /api/namespace)"
 
 echo "== data plane (Kinetica) =="
 NS=$(curl -s "${H[@]}" -d '{"name":"smoke"}' "$BASE/api/namespace" | sed -E 's/.*"id":"([0-9a-f-]+)".*/\1/')

@@ -85,7 +85,11 @@ services:
     working_dir: /app/server
     command: ["sh", "-c", "bun run cp:migrate && bun run cp:seed"]
     environment: &atlas_env
-      NODE_ENV: production
+      # NOT production: over plain HTTP the session cookies must not be Secure,
+      # or the browser drops them (login works, then every API call 400s). This
+      # single flag is the only thing NODE_ENV gates in atlas. Front the box with
+      # HTTPS (reverse proxy) and you can set this back to production.
+      NODE_ENV: development
       PORT: "3000"
       APP_EXTERNAL_URL: "http://${HOST_IP}:3080"
       CP_DATABASE_URL: "postgresql://toolbelt:toolbelt_dev@cp-db:5432/toolbelt_cp"
