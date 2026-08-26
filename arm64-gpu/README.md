@@ -48,7 +48,7 @@ extraction instead, set `GLINER_RELEX_URL: ""` in the compose.
 |---|---|
 | `docker-compose.yml` | The stack. |
 | `setup.sh` | Generates `.env`, enables the GPU, warms the model, brings it up. |
-| `smoke.sh` | Acceptance test — 15 end-to-end checks, non-zero exit on failure. |
+| `smoke.sh` | Acceptance test — 17 end-to-end checks, non-zero exit on failure. |
 | `kinetica-init.sh` | Kinetica first-boot config (external auth + admin). |
 | `start_auth.sh` | OIDC provider entry point. |
 | `.env.example` | Config template. Pin `TB_TAG` to a released image tag. |
