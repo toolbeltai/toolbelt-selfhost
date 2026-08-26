@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Toolbelt on ARM64 + GPU — one-time setup.
-# Generates .env with fresh secrets, checks the GPU, and (optionally) starts
-# the local SLM. Safe to re-run: it will not overwrite an existing .env.
+# Toolbelt on ARM64 + GPU — setup. Generates .env with fresh secrets, enables
+# the GPU, warms the model, and brings the stack up.
+#
+# Idempotent + re-runnable: keeps an existing .env, reuses a running or stopped
+# Ollama, skips already-downloaded models, and `compose up -d` just reconciles.
+# Safe to re-run after an error or on an already-running box.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -48,20 +51,22 @@ else
   echo "   /etc/cdi/nvidia.yaml present."
 fi
 
-# --- Local SLM ------------------------------------------------------------
+# --- Local SLM (Ollama on the GPU) — idempotent ---------------------------
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 echo "==> Local SLM (Ollama on the GPU)"
-if ! docker ps --format '{{.Names}}' | grep -qx ollama; then
-  echo "   Starting Ollama…"
+if docker ps -a --format '{{.Names}}' | grep -qx ollama; then
+  docker start ollama >/dev/null 2>&1 || true          # exists (running or stopped) → ensure up
+else
+  echo "   starting Ollama…"
   docker run -d --name ollama --device nvidia.com/gpu=all \
     -p 11434:11434 -v ollama:/root/.ollama ollama/ollama:latest >/dev/null
-  sleep 3
 fi
-echo "   Pulling ${SLM_CHAT_MODEL} and ${SLM_EMBED_MODEL} (first pull can take a few minutes)…"
+printf '   waiting for Ollama'                          # ready before we pull
+for _ in $(seq 1 30); do curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1 && break; printf .; sleep 2; done; echo
+echo "   ensuring models present (pull is a no-op if already downloaded)…"
 docker exec ollama ollama pull "${SLM_CHAT_MODEL}"
 docker exec ollama ollama pull "${SLM_EMBED_MODEL}"
-docker exec ollama ollama ps
 
 echo
 echo "==> Bringing up the full stack (Kinetica first-boot takes 2-3 min)…"
