@@ -93,6 +93,8 @@ services:
       KINETICA_INSTANCES: '[{"name":"Kinetica ARM","url":"http://kinetica:9191","handshakeKey":"${TB_HANDSHAKE}","isDefault":true,"isActive":true}]'
       ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
       TOOLBELT_SERVICE_SECRET: "${TOOLBELT_SERVICE_SECRET}"
+      # Optional Enterprise license key (blank = community mode). See docs.
+      TOOLBELT_LICENSE: "${TOOLBELT_LICENSE:-}"
       ACCESS_TOKEN_PRIVATE_KEY: "${ACCESS_TOKEN_PRIVATE_KEY}"
       ACCESS_TOKEN_PUBLIC_KEY: "${ACCESS_TOKEN_PUBLIC_KEY}"
       COOKIE_SECRET: "${COOKIE_SECRET}"
