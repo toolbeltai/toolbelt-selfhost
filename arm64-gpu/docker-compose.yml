@@ -101,8 +101,10 @@ services:
       OIDC_CLIENT_SECRET: "dev-handshake-key"
       OIDC_REDIRECT_URI: "http://${HOST_IP}:3080/auth/callback"
       TOOLBELT_MCP_URL: "http://mcp:3100"
+      # Documents: docling + smart-parser. Knowledge-graph entity extraction: the
+      # GLiNER encoder (relex, CPU) — more thorough than the LLM.
       SMART_PARSER_URL: "http://smart-parser:3200"
-      GLINER_RELEX_URL: ""
+      GLINER_RELEX_URL: "http://relex:8090"
       LLMOPS_API_URL: ""
       BIFROST_URL: ""
       OLLAMA_URL: "http://${HOST_IP}:11434"
@@ -159,6 +161,17 @@ services:
       SMART_PARSER_MCP_PORT: "3200"
     ports: ["3200:3200"]
     depends_on: [docling]
+    networks: [tbnet]
+
+  # ---------------------------- Knowledge-graph encoder (GLiNER, CPU, arm64)
+  relex:
+    image: ${TB_REGISTRY}/toolbelt-relex:stable-cpu
+    container_name: tb-relex
+    restart: unless-stopped
+    environment:
+      DEVICE: "cpu"          # no arm64 CUDA base yet; CPU extracts ~1-2s/doc
+      PORT: "8090"
+    ports: ["8090:8090"]
     networks: [tbnet]
 
   # -------------------------------------------------------------------- MCP

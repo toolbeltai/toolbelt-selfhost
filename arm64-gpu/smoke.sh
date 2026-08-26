@@ -17,7 +17,7 @@ ok(){ echo "  PASS  $1"; pass=$((pass+1)); }
 no(){ echo "  FAIL  $1"; fail=$((fail+1)); }
 
 echo "== containers =="
-for c in tb-kinetica tb-cp-db tb-auth tb-atlas tb-mcp tb-docling tb-smart-parser; do
+for c in tb-kinetica tb-cp-db tb-auth tb-atlas tb-mcp tb-docling tb-smart-parser tb-relex; do
   s=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo missing)
   [ "$s" = running ] && ok "$c running" || no "$c ($s)"
 done
@@ -26,10 +26,14 @@ echo "== reachability =="
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/auth/config")" = 200 ] && ok "atlas API" || no "atlas API"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$MCP/health")" = 200 ] && ok "mcp health" || no "mcp health"
 curl -s "http://${HOST_IP}:11434/v1/models" | grep -q "${SLM_CHAT_MODEL%%:*}" && ok "SLM present" || no "SLM present"
+curl -s http://localhost:8090/health | grep -q '"loaded":true' && ok "KG encoder loaded (relex)" || no "KG encoder (relex)"
 
 echo "== data plane (Kinetica) =="
 NS=$(curl -s "${H[@]}" -d '{"name":"smoke"}' "$BASE/api/namespace" | sed -E 's/.*"id":"([0-9a-f-]+)".*/\1/')
-[ -n "$NS" ] && ok "namespace create ($NS)" || { no "namespace create"; NS=""; }
+[ -n "$NS" ] && ok "namespace create ($NS)" || { no "namespace create (quota? delete unused namespaces)"; NS=""; }
+# Always remove the namespace we created, so this test is re-runnable and never
+# fills the namespace quota. Runs on any exit.
+trap '[ -n "${NS:-}" ] && curl -s "${H[@]}" -X DELETE "$BASE/api/namespace/$NS" >/dev/null 2>&1' EXIT
 # atlas resolves the Kinetica instance from the namespace — no id parsing needed
 sql(){ curl -s "${H[@]}" -d "{\"sql\":\"$1\",\"namespaceId\":\"$NS\"}" "$BASE/api/query/execute-sql"; }
 sql "SELECT 1 AS ok" | grep -q '"success":true' && ok "SQL round-trip (handshake)" || no "SQL round-trip"

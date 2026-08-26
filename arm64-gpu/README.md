@@ -34,12 +34,13 @@ it afterward). `setup.sh` prints your `HOST_IP`.
 - **atlas** — control plane / UI + API (`:3080`).
 - **mcp** — agent surface (`:3100`).
 - **docling** + **smart-parser** — document parsing (PDF/OCR/layout) → chunks + entities.
+- **relex** — the GLiNER knowledge-graph encoder (runs on CPU here, ~1–2s/doc).
 - **ollama** — the language model on the GPU, OpenAI-compatible.
 
-Full data path: SQL, vector search, document ingestion, and a knowledge graph.
-KG **entity extraction** runs on the local model until the dedicated encoder
-(`toolbelt-relex`) ships an ARM build — the model is complete-but-slower, the
-encoder is faster and more precise.
+Full data path: SQL, vector search, document ingestion, and an encoder-built
+knowledge graph. Entity + relation extraction is the GLiNER encoder (`relex`),
+not the language model — more thorough, no token spend. To use the model for
+extraction instead, set `GLINER_RELEX_URL: ""` in the compose.
 
 ## Files
 
