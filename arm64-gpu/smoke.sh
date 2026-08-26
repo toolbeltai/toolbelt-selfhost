@@ -16,6 +16,16 @@ pass=0; fail=0
 ok(){ echo "  PASS  $1"; pass=$((pass+1)); }
 no(){ echo "  FAIL  $1"; fail=$((fail+1)); }
 
+# On a fresh install the stack is still settling (atlas seed, mcp, and the model
+# loads on its first call). Wait for readiness + warm the model so the checks
+# below aren't cold-start false negatives.
+echo "== waiting for the stack to be ready =="
+for _ in $(seq 1 90); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/auth/config")" = 200 ] && break; sleep 2; done
+for _ in $(seq 1 30); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$MCP/health")" = 200 ] && break; sleep 2; done
+echo "   warming the model (first call loads it)…"
+curl -s "http://${HOST_IP}:11434/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"${SLM_CHAT_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}" >/dev/null 2>&1 || true
+
 echo "== containers =="
 for c in tb-kinetica tb-cp-db tb-auth tb-atlas tb-mcp tb-docling tb-smart-parser tb-relex; do
   s=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo missing)
