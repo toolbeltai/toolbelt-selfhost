@@ -21,7 +21,7 @@ Both give the same Toolbelt. The only question is whether the language model liv
 git clone https://github.com/toolbeltai/toolbelt-selfhost
 cd toolbelt-selfhost/arm64-gpu
 ./setup.sh          # writes config, enables the GPU, warms the model, brings it up
-./smoke.sh          # prove it works — 17 end-to-end checks
+./smoke.sh          # prove it works — 18 end-to-end checks
 ```
 
 Then open `http://<HOST_IP>:3080` (admin / Admin123!). Full walkthrough: **[arm64-gpu/README.md](arm64-gpu/README.md)**.

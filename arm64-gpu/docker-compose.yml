@@ -98,7 +98,11 @@ services:
       ACCESS_TOKEN_PRIVATE_KEY: "${ACCESS_TOKEN_PRIVATE_KEY}"
       ACCESS_TOKEN_PUBLIC_KEY: "${ACCESS_TOKEN_PUBLIC_KEY}"
       COOKIE_SECRET: "${COOKIE_SECRET}"
-      OIDC_ISSUER_URL: "http://${HOST_IP}:8380/oauth2"
+      COOKIE_NAME: "dccrefresh_token"
+      COOKIE_EXPIRY: "86400"
+      # Server-side login runs inside atlas → reach auth by its internal name
+      # (the browser only ever talks to atlas on :3080).
+      OIDC_ISSUER_URL: "http://auth:8380/oauth2"
       OIDC_CLIENT_ID: "atlas-ui"
       OIDC_CLIENT_SECRET: "dev-handshake-key"
       OIDC_REDIRECT_URI: "http://${HOST_IP}:3080/auth/callback"

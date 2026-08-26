@@ -28,6 +28,11 @@ echo "== reachability =="
 curl -s "http://${HOST_IP}:11434/v1/models" | grep -q "${SLM_CHAT_MODEL%%:*}" && ok "SLM present" || no "SLM present"
 curl -s http://localhost:8090/health | grep -q '"loaded":true' && ok "KG encoder loaded (relex)" || no "KG encoder (relex)"
 
+echo "== login (real OIDC flow, not the service-secret shortcut) =="
+curl -s -X POST "$BASE/auth/login" -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Admin123!"}' | grep -q '"access_token"' \
+  && ok "UI login (admin)" || no "UI login (admin) — check COOKIE_NAME + OIDC_ISSUER_URL"
+
 echo "== data plane (Kinetica) =="
 NS=$(curl -s "${H[@]}" -d '{"name":"smoke"}' "$BASE/api/namespace" | sed -E 's/.*"id":"([0-9a-f-]+)".*/\1/')
 [ -n "$NS" ] && ok "namespace create ($NS)" || { no "namespace create (quota? delete unused namespaces)"; NS=""; }
