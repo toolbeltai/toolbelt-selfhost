@@ -1,0 +1,81 @@
+# Toolbelt — single CPU box, no GPU, remote LLM inference.
+# Used in RUNBOOK.md Phase 3. Edit every <PLACEHOLDER> before install.
+#
+#   helm install toolbelt oci://ghcr.io/toolbeltai/toolbelt/toolbelt \
+#     -n toolbelt --create-namespace -f values-cpu-singlebox.yaml
+#
+# Keys below are verified against charts/toolbelt/values.yaml (chart 0.2.31).
+
+# ── Identity / URLs ─────────────────────────────────────────────
+hostname: "<BOX_IP_OR_DNS>"                 # e.g. 10.0.0.12  or  toolbelt.acme.internal
+scheme: "http"                               # "https" only if TLS terminates at an ingress
+appExternalUrl: "http://<BOX_IP_OR_DNS>:30080"
+mcpExternalUrl: "http://<BOX_IP_OR_DNS>:30080/mcp"
+
+atlas:
+  seedAdminUser: "admin"                     # internal Kinetica admin (guaranteed; native pw in secret cluster0-internal-password-secret). Don't use kadmin — that name is customer-changeable
+  env:
+    SITE_URL: "http://<BOX_IP_OR_DNS>:30080" # drives absolute links in onboarding/quota
+
+# ── Kinetica connection (from Phase 2; in-cluster service DNS) ──
+auth:
+  env:
+    KINETICA_URL: "http://<KINETICA_SVC>.gpudb:9191"
+    KINETICA_URLS_ALLOWED: "http://<KINETICA_SVC>.gpudb:9191"
+
+# ── Remote inference — BOTH the LLM and the embedding model ─────
+# DECISION for this test: leave these BLANK and configure them in the Atlas
+# Models UI AFTER first login (RUNBOOK Phase 4). Atlas will wait for an admin to
+# set a model before onboarding. "Remote" = any OpenAI-compatible endpoint:
+# Nebius/OpenAI, or our own GPU k8s exposing vLLM + an embedding model.
+# (To pre-bake instead, fill name/apiUrl/apiKey/dimension here; source stays "external".)
+llm:
+  default:
+    name: ""
+    apiUrl: ""
+    apiKey: ""
+    provider: "OpenAI"
+    source: "external"
+  embedding:
+    name: ""
+    apiUrl: ""
+    apiKey: ""
+    provider: "OpenAI"
+    source: "external"
+    dimension: 0
+
+# ── CPU-only: force ML services off GPU, drop the unused GPU service ──
+glinerRelex:
+  enabled: true
+  gpu:
+    mode: "off"                              # force CPU entity extraction (default "auto" also lands on CPU here)
+  device: "cpu"
+
+doclingServe:
+  runtimeClassName: ""                       # CPU — no nvidia runtime; CUDA image falls back to CPU
+  dra:
+    enabled: false
+
+sl2Api:
+  enabled: false                             # image embeddings — NOT used, and the only service that hard-needs a GPU
+
+llmops:
+  enabled: true                              # management UI only here (cannot serve local models w/o GPU — fine, we're remote)
+
+gpuOperator:
+  install: false                             # no GPU on this box
+
+# ── Bundled control-plane Postgres (single box) ─────────────────
+# For an external/RDS Postgres instead: set postgres.enabled=false and
+# externalDatabase.url (see examples/values-external-pg.yaml).
+postgres:
+  enabled: true
+  persistence:
+    storageClass: "<STORAGE_CLASS>"          # k3s default = "local-path"; Longhorn = "longhorn"
+
+# ── Networking ──────────────────────────────────────────────────
+# gateway.enabled=false → bring-your-own ingress (Phase 1 appliance installer
+# exposes atlas on NodePort 30080 instead). If you brought your own k8s,
+# point your ingress at services atlas:3000 and mcp:3100.
+gateway:
+  enabled: false
