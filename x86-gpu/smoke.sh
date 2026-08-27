@@ -73,6 +73,35 @@ sql "SELECT c,w FROM toolbelt_user_admin.t ORDER BY w DESC LIMIT 1" | grep -q '"
 curl -s "${H[@]}" -d "{\"question\":\"Which c has the highest w?\",\"namespaceId\":\"$NS\"}" \
   "$BASE/api/query/ask" | grep -q '"gpu"' && ok "ask answered by SLM" || no "ask via SLM"
 
+echo "== document -> KG + embeddings (docling · smart-parser · relex · embed) =="
+# A document exercises the full ingest path the relational test above does NOT:
+# docling parses it, smart-parser chunks it, relex extracts entities (the KG),
+# and the embedding model vectorizes the chunks.
+DOC='Acme Corporation, headquartered in Boston, deployed the Falcon analytics platform in 2024. Jane Smith leads the data team there.'
+B64=$(printf '%s' "$DOC" | base64 | tr -d '\n')
+curl -s "${H[@]}" -d "{\"name\":\"smoke-note\",\"fileName\":\"note.txt\",\"content\":\"$B64\"}" \
+  "$BASE/api/namespace/$NS/asset/save/document" >/dev/null
+kgn=0
+# On a cold box docling loads its layout models on the very first parse, which
+# can take a couple of minutes, so give the extraction real room here.
+for _ in $(seq 1 100); do
+  kgn=$(curl -s "${H[@]}" "$BASE/api/namespace/$NS/kg/summary" | grep -oE '"nodeCount":[0-9]+' | grep -oE '[0-9]+$')
+  [ "${kgn:-0}" -gt 0 ] && break; sleep 3
+done
+[ "${kgn:-0}" -gt 0 ] && ok "document -> KG ($kgn entities: docling + relex)" || no "document -> KG (docling/relex extraction)"
+# Chunk embedding + vector indexing finishes a little after entity extraction,
+# so poll the vector search separately instead of assuming it's ready at once.
+# vector-search searches a named collection; a namespace's chunks live in one
+# table, embeddings_<namespaceId with '-' -> '_'> (see services/vectorStore.ts).
+COLL="embeddings_$(printf '%s' "$NS" | tr - _)"
+vhit=""
+for _ in $(seq 1 40); do
+  curl -s "${H[@]}" -d "{\"query\":\"who leads the data team\",\"namespaceId\":\"$NS\",\"k\":5,\"collectionName\":\"$COLL\"}" \
+    "$BASE/api/query/vector-search" | grep -qiE "acme|falcon|jane|boston|data team" && { vhit=1; break; }
+  sleep 3
+done
+[ -n "$vhit" ] && ok "vector search (embedding model)" || no "vector search (embedding)"
+
 echo "== agent surface (MCP) =="
 TOK=$(curl -s "${H[@]}" "$BASE/api/mcp-config?namespace=$NS" | grep -oE 'tb_[A-Za-z0-9_.-]+' | head -1)
 hi=(-H "Authorization: Bearer $TOK" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream")

@@ -66,7 +66,10 @@ if docker ps -a --format '{{.Names}}' | grep -qx ollama; then
   docker start ollama >/dev/null 2>&1 || true          # exists (running or stopped) → ensure up
 else
   echo "   starting Ollama…"
+  # OLLAMA_KEEP_ALIVE=-1: once a model is loaded onto the GPU it stays resident,
+  # so the first query (and the smoke test) don't pay the cold-load cost.
   docker run -d --name ollama --restart unless-stopped --gpus all \
+    -e OLLAMA_KEEP_ALIVE=-1 \
     -p 11434:11434 -v ollama:/root/.ollama ollama/ollama:latest >/dev/null
 fi
 printf '   waiting for Ollama'                          # ready before we pull
@@ -74,6 +77,18 @@ for _ in $(seq 1 30); do curl -fsS http://localhost:11434/api/tags >/dev/null 2>
 echo "   ensuring models present (pull is a no-op if already downloaded)…"
 docker exec ollama ollama pull "${SLM_CHAT_MODEL}"
 docker exec ollama ollama pull "${SLM_EMBED_MODEL}"
+
+# Warm-load both models onto the GPU now, pinned (keep_alive:-1), so the stack
+# comes up against warm models. The chat model's first load reads ~5GB into VRAM
+# and can take a few minutes on a busy first-boot — better to pay it here, once,
+# with a progress line, than to have a user's first question hang.
+echo "   warming models on the GPU (first load of the chat model can take a few minutes)…"
+curl -fsS http://localhost:11434/api/chat \
+  -d "{\"model\":\"${SLM_CHAT_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":false,\"keep_alive\":-1}" >/dev/null \
+  && echo "     chat model loaded." || echo "     !! chat warm-up failed — check 'docker logs ollama'."
+curl -fsS http://localhost:11434/api/embeddings \
+  -d "{\"model\":\"${SLM_EMBED_MODEL}\",\"prompt\":\"hi\",\"keep_alive\":-1}" >/dev/null \
+  && echo "     embedding model loaded." || echo "     !! embed warm-up failed — check 'docker logs ollama'."
 
 echo
 echo "==> Bringing up the full stack (Kinetica first-boot takes 2-3 min)…"
