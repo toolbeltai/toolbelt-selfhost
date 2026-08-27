@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
-# Toolbelt on ARM64 + GPU — setup. Generates .env with fresh secrets, enables
-# the GPU, warms the model, and brings the stack up.
+# Toolbelt on x86 + NVIDIA GPU — setup. Generates .env with fresh secrets,
+# verifies containers can reach the GPU, warms the local model on the GPU, and
+# brings the stack up.
 #
-# Idempotent + re-runnable: keeps an existing .env, reuses a running or stopped
-# Ollama, skips already-downloaded models, and `compose up -d` just reconciles.
-# Safe to re-run after an error or on an already-running box.
+# GPU usage: the local LLM (Ollama) and the knowledge-graph encoder (relex, CUDA)
+# run on the GPU; Kinetica runs on CPU (free single-box). Needs docker + the
+# NVIDIA Container Toolkit — both preinstalled on AWS Deep Learning GPU AMIs.
+#
+# Idempotent + re-runnable: keeps an existing .env, reuses a running/stopped
+# Ollama, skips downloaded models, and `compose up -d` just reconciles.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "==> Toolbelt (ARM64 + GPU) setup"
+echo "==> Toolbelt (x86 + GPU) setup"
 
-# --- sanity: arch + docker ------------------------------------------------
+# --- sanity: arch + docker + driver ---------------------------------------
 ARCH="$(uname -m)"
-[ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ] || \
-  echo "!! WARNING: arch is $ARCH, not arm64 — images are arm64-native; you'll emulate."
+[ "$ARCH" = "x86_64" ] || \
+  echo "!! WARNING: arch is $ARCH, not x86_64 — this profile targets x86; use the arm64-gpu profile on ARM."
 command -v docker >/dev/null || { echo "!! docker not found"; exit 1; }
 command -v openssl >/dev/null || { echo "!! openssl not found"; exit 1; }
+if command -v nvidia-smi >/dev/null; then nvidia-smi -L | head -1; else
+  echo "!! nvidia-smi not found — install the NVIDIA driver (AWS DL GPU AMIs already have it)."; fi
 
 # --- .env -----------------------------------------------------------------
 if [ -f .env ]; then
@@ -41,14 +47,15 @@ else
   echo "   HOST_IP=${HOST_IP}  (edit .env if the browser reaches this box by another address)"
 fi
 
-# --- GPU / CDI ------------------------------------------------------------
-echo "==> Checking GPU access for containers (CDI)"
-if [ ! -f /etc/cdi/nvidia.yaml ]; then
-  echo "   No CDI spec found. Generating one (needs sudo)…"
-  sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml || \
-    echo "!! Could not generate CDI. Install the NVIDIA Container Toolkit, then re-run."
+# --- GPU access for containers (NVIDIA Container Toolkit) ------------------
+echo "==> Checking containers can see the GPU (--gpus all)"
+if docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi -L >/dev/null 2>&1; then
+  echo "   OK — containers can access the GPU."
 else
-  echo "   /etc/cdi/nvidia.yaml present."
+  echo "!! Containers can't reach the GPU. Install the NVIDIA Container Toolkit, then:"
+  echo "     sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
+  echo "   docs: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html"
+  exit 1
 fi
 
 # --- Local SLM (Ollama on the GPU) — idempotent ---------------------------
@@ -59,7 +66,7 @@ if docker ps -a --format '{{.Names}}' | grep -qx ollama; then
   docker start ollama >/dev/null 2>&1 || true          # exists (running or stopped) → ensure up
 else
   echo "   starting Ollama…"
-  docker run -d --name ollama --restart unless-stopped --device nvidia.com/gpu=all \
+  docker run -d --name ollama --restart unless-stopped --gpus all \
     -p 11434:11434 -v ollama:/root/.ollama ollama/ollama:latest >/dev/null
 fi
 printf '   waiting for Ollama'                          # ready before we pull
@@ -74,4 +81,4 @@ docker compose up -d
 echo
 echo "==> Up. Watch it settle:  docker compose ps"
 echo "    Open  http://${HOST_IP}:3080   (admin / Admin123!)"
-echo "    Everything runs on this box — nothing external."
+echo "    Local LLM + KG encoder run on the GPU; everything else on this box."

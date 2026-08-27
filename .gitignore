@@ -1,0 +1,18 @@
+# PUBLIC REPO — never commit secrets or local state.
+
+# Generated env / secrets (setup.sh writes a real .env from .env.example)
+.env
+*.pem
+*.key
+*_priv*
+.mcp_priv.pem
+.mcp_pub.pem
+
+# Terraform is an INTERNAL validation tool only — not part of the shipped bundle.
+# The state file and generated SSH key live here and must never be published.
+**/aws-terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
