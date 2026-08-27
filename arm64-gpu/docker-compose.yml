@@ -27,7 +27,7 @@ services:
     volumes:
       - kinetica-persist:/opt/gpudb/persist
       - ./kinetica-init.sh:/opt/gpudb/dev/kinetica-init.sh:ro
-    ports: ["9191:9191", "8080:8080"]   # API, GAdmin
+    ports: ["9191:9191", "8080:8080", "8000:8000"]   # API, GAdmin, Workbench (SQL editor + notebooks)
     healthcheck:
       test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/9191' || exit 1"]
       interval: 10s
