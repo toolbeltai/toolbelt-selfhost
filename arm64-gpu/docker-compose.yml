@@ -109,7 +109,12 @@ services:
       OIDC_CLIENT_ID: "atlas-ui"
       OIDC_CLIENT_SECRET: "dev-handshake-key"
       OIDC_REDIRECT_URI: "http://${HOST_IP}:3080/auth/callback"
-      TOOLBELT_MCP_URL: "http://mcp:3100"
+      # EXTERNAL URL — atlas advertises this in the "Connect" snippets the user
+      # pastes into Claude Desktop / their agent, so it must be reachable from
+      # OFF the box. atlas's own server-side calls to mcp hairpin back through the
+      # published port (verified: the atlas container reaches ${HOST_IP}:3100).
+      # An internal name like mcp:3100 would render an unreachable connect URL.
+      TOOLBELT_MCP_URL: "http://${HOST_IP}:3100"
       # Documents: docling + smart-parser. Knowledge-graph entity extraction: the
       # GLiNER encoder (relex, CPU) — more thorough than the LLM.
       SMART_PARSER_URL: "http://smart-parser:3200"
