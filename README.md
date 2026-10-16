@@ -27,6 +27,19 @@ cd toolbelt-selfhost/x86-gpu
 
 Then open `http://<HOST_IP>:3080` (admin / Admin123!). Full walkthrough: **[x86-gpu/README.md](x86-gpu/README.md)**.
 
+## Upgrading
+
+```sh
+git pull
+./setup.sh      # in your profile's folder: keeps your .env and data, pulls, reconciles
+```
+
+Always upgrade with `setup.sh`, not a bare `docker compose up`: it also runs
+one-time data moves. **Installs from before 2026-10-16:** the control-plane
+database was stored in an unnamed Docker volume (a Postgres 18 path mismatch),
+so `docker compose down` lost it. `setup.sh` moves it into the `cp-db-data`
+volume on the next run; after that, `down` and `up` keep your data.
+
 Other profiles:
 
 - **ARM64 + GPU** (GB10 / DGX Spark, GH200, Graviton + G5g) → **[arm64-gpu/README.md](arm64-gpu/README.md)**

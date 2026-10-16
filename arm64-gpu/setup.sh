@@ -69,6 +69,9 @@ docker exec ollama ollama pull "${SLM_CHAT_MODEL}"
 docker exec ollama ollama pull "${SLM_EMBED_MODEL}"
 
 echo
+. ../lib/migrate-cp-db.sh
+migrate_cp_db_volume
+
 echo "==> Bringing up the full stack (Kinetica first-boot takes 2-3 min)…"
 docker compose up -d
 echo
