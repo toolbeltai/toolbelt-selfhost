@@ -40,6 +40,11 @@ database was stored in an unnamed Docker volume (a Postgres 18 path mismatch),
 so `docker compose down` lost it. `setup.sh` moves it into the `cp-db-data`
 volume on the next run; after that, `down` and `up` keep your data.
 
+Upgraded with a bare `docker compose up` and now see an empty app? Your data
+is still there, in an unnamed volume. `lib/recover-cp-db.sh` lists the
+candidates; `lib/recover-cp-db.sh <volume> <profile>` moves the one you pick
+back into place.
+
 Other profiles:
 
 - **ARM64 + GPU** (GB10 / DGX Spark, GH200, Graviton + G5g) → **[arm64-gpu/README.md](arm64-gpu/README.md)**
