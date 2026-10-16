@@ -91,6 +91,9 @@ curl -fsS http://localhost:11434/api/embeddings \
   && echo "     embedding model loaded." || echo "     !! embed warm-up failed — check 'docker logs ollama'."
 
 echo
+. ../lib/migrate-cp-db.sh
+migrate_cp_db_volume
+
 echo "==> Bringing up the full stack (Kinetica first-boot takes 2-3 min)…"
 docker compose up -d
 echo

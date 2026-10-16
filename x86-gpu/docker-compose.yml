@@ -44,7 +44,7 @@ services:
     container_name: tb-cp-db
     restart: unless-stopped
     environment: { POSTGRES_USER: toolbelt, POSTGRES_PASSWORD: toolbelt_dev, POSTGRES_DB: toolbelt_cp }
-    volumes: ["cp-db-data:/var/lib/postgresql/data"]
+    volumes: ["cp-db-data:/var/lib/postgresql"]   # PG18 data is under 18/docker; see lib/migrate-cp-db.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U toolbelt -d toolbelt_cp"]
       interval: 5s
