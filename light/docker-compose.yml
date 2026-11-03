@@ -1,0 +1,211 @@
+name: toolbelt-light
+# Toolbelt light: Toolbelt + Kinetica on one CPU box, no GPU. The chat and
+# embedding models are hosted (Toolbelt-hosted inference, or any OpenAI-compatible
+# endpoint), called directly with INFERENCE_API_KEY. Everything else (data,
+# documents, parsing, the knowledge graph) stays here.
+#
+#   ./setup.sh          # writes .env (secrets), checks the model endpoint, brings this up
+#
+# Kinetica: the bundled one (profile bundled-kinetica, the default) or an existing
+# one at KINETICA_URL. Host networking: add host-network.yml to COMPOSE_FILE.
+# The bundled Kinetica gets its handshake + admin from kinetica-init.sh on first
+# boot; atlas gets its instance from KINETICA_INSTANCES below.
+
+networks: { tbnet: {} }
+volumes: { kinetica-persist: {}, cp-db-data: {} }
+
+services:
+  # ---------------------------------------------------------------- Kinetica
+  kinetica:
+    image: docker.io/kinetica/kinetica-cpu:7.2.3
+    container_name: tb-kinetica
+    profiles: [bundled-kinetica]
+    restart: unless-stopped
+    environment:
+      GPUDB_CONF: /opt/gpudb/dev/gpudb.conf
+      GPUDB_START_ALL: "1"
+      ACCEPT_LICENSE: "Y"
+      TB_HANDSHAKE: "${TB_HANDSHAKE}"
+    entrypoint: ["/bin/bash", "/opt/gpudb/dev/kinetica-init.sh"]
+    volumes:
+      - kinetica-persist:/opt/gpudb/persist
+      - ./kinetica-init.sh:/opt/gpudb/dev/kinetica-init.sh:ro
+    ports: ["9191:9191", "8080:8080", "8000:8000"]   # API, GAdmin, Workbench (SQL editor + notebooks)
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/9191' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 42
+      start_period: 180s
+    shm_size: "2gb"
+    ulimits: { memlock: -1, nofile: { soft: 65536, hard: 65536 } }
+    networks: [tbnet]
+
+  # ------------------------------------------------------- Control-plane DB
+  cp-db:
+    image: postgres:18.1-alpine
+    container_name: tb-cp-db
+    restart: unless-stopped
+    environment: { POSTGRES_USER: toolbelt, POSTGRES_PASSWORD: toolbelt_dev, POSTGRES_DB: toolbelt_cp }
+    volumes: ["cp-db-data:/var/lib/postgresql"]   # PG18 data is under 18/docker; see lib/migrate-cp-db.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toolbelt -d toolbelt_cp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [tbnet]
+
+  # ------------------------------------------------------------------- Auth
+  auth:
+    image: docker.io/kineticadevcloud/kinetica-auth:3.13
+    container_name: tb-auth
+    restart: unless-stopped
+    environment:
+      KINETICA_OAUTH_PORT: "8380"
+      KINETICA_OAUTH_ALLOWED_HOSTS: "*"
+      KINETICA_URL: "${KINETICA_URL}"
+      KINETICA_EXTERNAL_HOST: "${HOST_IP}"
+      OIDC_CLIENT_ID: "atlas-ui"
+      OIDC_CLIENT_SECRET: "dev-handshake-key"
+      OIDC_REDIRECT_URI: "http://${HOST_IP}:3080/auth/callback"
+    entrypoint: ["/bin/bash", "/app/bin/start_auth_custom.sh"]
+    volumes: ["./start_auth.sh:/app/bin/start_auth_custom.sh:ro"]
+    ports: ["8380:8380"]
+    depends_on: { kinetica: { condition: service_healthy, required: false } }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8380/oauth2/.well-known/openid-configuration || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [tbnet]
+
+  # ----------------------------------- Atlas one-shot: migrate + seed (BYO SLM)
+  atlas-seed:
+    image: ${TB_REGISTRY}/atlas:${TB_TAG}
+    container_name: tb-atlas-seed
+    restart: "no"
+    working_dir: /app/server
+    command: ["sh", "-c", "bun run cp:migrate && bun run cp:seed"]
+    environment: &atlas_env
+      # atlas auto-detects HTTP vs HTTPS for the session cookie from
+      # APP_EXTERNAL_URL, so this works over plain HTTP on a box and stays
+      # correctly Secure behind HTTPS — nothing to toggle.
+      NODE_ENV: production
+      PORT: "3000"
+      APP_EXTERNAL_URL: "http://${HOST_IP}:3080"
+      CP_DATABASE_URL: "postgresql://toolbelt:toolbelt_dev@cp-db:5432/toolbelt_cp"
+      # atlas seeds/reconciles its Kinetica instance from this — plain env, no file plumbing
+      KINETICA_INSTANCES: '[{"name":"Kinetica","url":"${KINETICA_URL}","handshakeKey":"${TB_HANDSHAKE}","isDefault":true,"isActive":true}]'
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
+      TOOLBELT_SERVICE_SECRET: "${TOOLBELT_SERVICE_SECRET}"
+      # Optional Enterprise license key (blank = community mode). See docs.
+      TOOLBELT_LICENSE: "${TOOLBELT_LICENSE:-}"
+      ACCESS_TOKEN_PRIVATE_KEY: "${ACCESS_TOKEN_PRIVATE_KEY}"
+      ACCESS_TOKEN_PUBLIC_KEY: "${ACCESS_TOKEN_PUBLIC_KEY}"
+      COOKIE_SECRET: "${COOKIE_SECRET}"
+      COOKIE_NAME: "dccrefresh_token"
+      COOKIE_EXPIRY: "86400"
+      # Server-side login runs inside atlas → reach auth by its internal name
+      # (the browser only ever talks to atlas on :3080).
+      OIDC_ISSUER_URL: "http://auth:8380/oauth2"
+      OIDC_CLIENT_ID: "atlas-ui"
+      OIDC_CLIENT_SECRET: "dev-handshake-key"
+      OIDC_REDIRECT_URI: "http://${HOST_IP}:3080/auth/callback"
+      # EXTERNAL URL — atlas advertises this in the "Connect" snippets the user
+      # pastes into Claude Desktop / their agent, so it must be reachable from
+      # OFF the box. atlas's own server-side calls to mcp hairpin back through the
+      # published port (verified: the atlas container reaches ${HOST_IP}:3100).
+      # An internal name like mcp:3100 would render an unreachable connect URL.
+      TOOLBELT_MCP_URL: "http://${HOST_IP}:3100"
+      # Documents: docling + smart-parser. Knowledge-graph entity extraction: the
+      # GLiNER encoder (relex) on CPU (~1-2 s/doc).
+      SMART_PARSER_URL: "http://smart-parser:3200"
+      GLINER_RELEX_URL: "http://relex:8090"
+      LLMOPS_API_URL: ""
+      BIFROST_URL: ""
+      OLLAMA_URL: ""
+      # Hosted models. Seeded once into atlas's model table (key included); atlas
+      # (chat, ask, embeddings, KG extraction) and mcp read them from there.
+      SEED_LLM_API_URL: "${INFERENCE_BASE_URL}"
+      SEED_LLM_API_KEY: "${INFERENCE_API_KEY}"
+      SEED_LLM_MODEL: "${CHAT_MODEL}"
+      SEED_LLM_PROVIDER: "OpenAI"
+      SEED_LLM_SOURCE: "external"
+      SEED_EMBEDDING_API_URL: "${INFERENCE_BASE_URL}"
+      SEED_EMBEDDING_API_KEY: "${INFERENCE_API_KEY}"
+      SEED_EMBEDDING_MODEL: "${EMBED_MODEL}"
+      SEED_EMBEDDING_PROVIDER: "OpenAI"
+      SEED_EMBEDDING_SOURCE: "external"
+      SEED_EMBEDDING_DIMENSION: "${EMBED_DIM}"
+    depends_on:
+      cp-db: { condition: service_healthy }
+      kinetica: { condition: service_healthy, required: false }
+    networks: [tbnet]
+
+  # ------------------------------------------------------------------ Atlas
+  atlas:
+    image: ${TB_REGISTRY}/atlas:${TB_TAG}
+    container_name: tb-atlas
+    restart: unless-stopped
+    environment: *atlas_env          # stock entrypoint (start:single) — no custom command
+    ports: ["3080:3000"]
+    depends_on:
+      atlas-seed: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/3000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+    networks: [tbnet]
+
+  # ---------------------------------------------- Document parsing (docling)
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.12.0   # the docling-serve release the Helm chart ships
+    container_name: tb-docling
+    restart: unless-stopped
+    ports: ["5001:5001"]
+    networks: [tbnet]
+
+  # ------------------------------------- Smart-parser (chunks + entities)
+  smart-parser:
+    image: ${TB_REGISTRY}/smart-parser:${TB_TAG}
+    container_name: tb-smart-parser
+    restart: unless-stopped
+    environment:
+      DOCLING_URL: "http://docling:5001"
+      SMART_PARSER_MCP_PORT: "3200"
+      # Atlas sends this on every call; without it smart-parser refuses them all.
+      TOOLBELT_SERVICE_SECRET: "${TOOLBELT_SERVICE_SECRET}"
+    ports: ["3200:3200"]
+    depends_on: [docling]
+    networks: [tbnet]
+
+  # ------------------------------ Knowledge-graph encoder (GLiNER-relex, CPU)
+  relex:
+    image: ${TB_REGISTRY}/toolbelt-relex:${TB_TAG}   # x86 image; runs on CPU here
+    container_name: tb-relex
+    restart: unless-stopped
+    environment:
+      DEVICE: "cpu"          # ~1-2 s/doc on CPU (sub-second on a GPU)
+      PORT: "8090"
+    ports: ["8090:8090"]
+    networks: [tbnet]
+
+  # -------------------------------------------------------------------- MCP
+  mcp:
+    image: ${TB_REGISTRY}/mcp:${TB_TAG}
+    container_name: tb-mcp
+    restart: unless-stopped
+    environment:
+      ATLAS_URL: "http://atlas:3000"
+      ATLAS_PUBLIC_URL: "http://${HOST_IP}:3080"
+      MCP_PUBLIC_URL: "http://${HOST_IP}:3100"
+      MCP_SERVER_HOST: "0.0.0.0"
+      MCP_SERVER_PORT: "3100"
+      TOOLBELT_SERVICE_SECRET: "${TOOLBELT_SERVICE_SECRET}"
+      ACCESS_TOKEN_PUBLIC_KEY: "${ACCESS_TOKEN_PUBLIC_KEY}"
+    ports: ["3100:3100"]
+    depends_on: { atlas: { condition: service_healthy } }
+    networks: [tbnet]
