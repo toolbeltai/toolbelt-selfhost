@@ -107,7 +107,6 @@ image yet).
 |---|---|
 | `docker-compose.yml` | The stack. |
 | `host-network.yml` | Host-networking override (see above). |
-| `fastagent.config.yaml` | Points smart-parser's spreadsheet agent at the hosted endpoint. |
 | `setup.sh` | Generates `.env`, checks the models (and an existing Kinetica), brings it up. |
 | `smoke.sh` | Acceptance test, non-zero exit on failure. |
 | `kinetica-init.sh` | Bundled Kinetica first-boot config (external auth + admin). |

@@ -175,15 +175,7 @@ services:
     restart: unless-stopped
     environment:
       DOCLING_URL: "http://docling:5001"
-      # smart-parser's own model calls (the messy-spreadsheet agent). It reads the
-      # key from NEBIUS_API_KEY; fastagent.config.yaml points it at the endpoint.
-      LLM_ENTITY_BASE_URL: "${INFERENCE_BASE_URL}"
-      LLM_ENTITY_MODEL: "${CHAT_MODEL}"
-      NEBIUS_API_KEY: "${INFERENCE_API_KEY}"
-      INFERENCE_BASE_URL: "${INFERENCE_BASE_URL}"
-      CHAT_MODEL: "${CHAT_MODEL}"
       SMART_PARSER_MCP_PORT: "3200"
-    volumes: ["./fastagent.config.yaml:/app/fastagent.config.yaml:ro"]
     ports: ["3200:3200"]
     depends_on: [docling]
     networks: [tbnet]
