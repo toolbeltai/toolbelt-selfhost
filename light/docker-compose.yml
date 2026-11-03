@@ -1,14 +1,15 @@
 name: toolbelt-light
-# Toolbelt light: Toolbelt + Kinetica on one CPU box, no GPU. The language and
+# Toolbelt light: Toolbelt + Kinetica on one CPU box, no GPU. The chat and
 # embedding models are hosted (Toolbelt-hosted inference, or any OpenAI-compatible
-# endpoint) and reached through `inference-proxy`, which adds the access headers so
-# the credentials stay on this box. Everything else (data, documents, parsing, the
-# knowledge graph) stays here.
+# endpoint), called directly with INFERENCE_API_KEY. Everything else (data,
+# documents, parsing, the knowledge graph) stays here.
 #
 #   ./setup.sh          # writes .env (secrets), checks the model endpoint, brings this up
 #
-# Handshake + admin are configured by kinetica-init.sh on first boot; atlas
-# gets its instance from the KINETICA_INSTANCES env below (no file plumbing).
+# Kinetica: the bundled one (profile bundled-kinetica, the default) or an existing
+# one at KINETICA_URL. Host networking: add host-network.yml to COMPOSE_FILE.
+# The bundled Kinetica gets its handshake + admin from kinetica-init.sh on first
+# boot; atlas gets its instance from KINETICA_INSTANCES below.
 
 networks: { tbnet: {} }
 volumes: { kinetica-persist: {}, cp-db-data: {} }
@@ -18,6 +19,7 @@ services:
   kinetica:
     image: docker.io/kinetica/kinetica-cpu:7.2.3
     container_name: tb-kinetica
+    profiles: [bundled-kinetica]
     restart: unless-stopped
     environment:
       GPUDB_CONF: /opt/gpudb/dev/gpudb.conf
@@ -61,7 +63,7 @@ services:
     environment:
       KINETICA_OAUTH_PORT: "8380"
       KINETICA_OAUTH_ALLOWED_HOSTS: "*"
-      KINETICA_URL: "http://kinetica:9191"
+      KINETICA_URL: "${KINETICA_URL}"
       KINETICA_EXTERNAL_HOST: "${HOST_IP}"
       OIDC_CLIENT_ID: "atlas-ui"
       OIDC_CLIENT_SECRET: "dev-handshake-key"
@@ -69,7 +71,7 @@ services:
     entrypoint: ["/bin/bash", "/app/bin/start_auth_custom.sh"]
     volumes: ["./start_auth.sh:/app/bin/start_auth_custom.sh:ro"]
     ports: ["8380:8380"]
-    depends_on: { kinetica: { condition: service_healthy } }
+    depends_on: { kinetica: { condition: service_healthy, required: false } }
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8380/oauth2/.well-known/openid-configuration || exit 1"]
       interval: 10s
@@ -94,7 +96,7 @@ services:
       APP_EXTERNAL_URL: "http://${HOST_IP}:3080"
       CP_DATABASE_URL: "postgresql://toolbelt:toolbelt_dev@cp-db:5432/toolbelt_cp"
       # atlas seeds/reconciles its Kinetica instance from this — plain env, no file plumbing
-      KINETICA_INSTANCES: '[{"name":"Kinetica","url":"http://kinetica:9191","handshakeKey":"${TB_HANDSHAKE}","isDefault":true,"isActive":true}]'
+      KINETICA_INSTANCES: '[{"name":"Kinetica","url":"${KINETICA_URL}","handshakeKey":"${TB_HANDSHAKE}","isDefault":true,"isActive":true}]'
       ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
       TOOLBELT_SERVICE_SECRET: "${TOOLBELT_SERVICE_SECRET}"
       # Optional Enterprise license key (blank = community mode). See docs.
@@ -123,23 +125,22 @@ services:
       LLMOPS_API_URL: ""
       BIFROST_URL: ""
       OLLAMA_URL: ""
-      # Models: hosted, through inference-proxy (which adds the access headers).
-      # The key is unused by the proxy but required by the OpenAI-style client.
-      SEED_LLM_API_URL: "http://inference-proxy:8080/v1"
-      SEED_LLM_API_KEY: "via-proxy"
+      # Hosted models. Seeded once into atlas's model table (key included); atlas
+      # (chat, ask, embeddings, KG extraction) and mcp read them from there.
+      SEED_LLM_API_URL: "${INFERENCE_BASE_URL}"
+      SEED_LLM_API_KEY: "${INFERENCE_API_KEY}"
       SEED_LLM_MODEL: "${CHAT_MODEL}"
       SEED_LLM_PROVIDER: "OpenAI"
       SEED_LLM_SOURCE: "external"
-      SEED_EMBEDDING_API_URL: "http://inference-proxy:8080/v1"
-      SEED_EMBEDDING_API_KEY: "via-proxy"
+      SEED_EMBEDDING_API_URL: "${INFERENCE_BASE_URL}"
+      SEED_EMBEDDING_API_KEY: "${INFERENCE_API_KEY}"
       SEED_EMBEDDING_MODEL: "${EMBED_MODEL}"
       SEED_EMBEDDING_PROVIDER: "OpenAI"
       SEED_EMBEDDING_SOURCE: "external"
       SEED_EMBEDDING_DIMENSION: "${EMBED_DIM}"
     depends_on:
       cp-db: { condition: service_healthy }
-      kinetica: { condition: service_healthy }
-      inference-proxy: { condition: service_started }
+      kinetica: { condition: service_healthy, required: false }
     networks: [tbnet]
 
   # ------------------------------------------------------------------ Atlas
@@ -161,7 +162,7 @@ services:
 
   # ---------------------------------------------- Document parsing (docling)
   docling:
-    image: quay.io/docling-project/docling-serve:latest
+    image: quay.io/docling-project/docling-serve-cpu:v1.12.0   # the docling-serve release the Helm chart ships
     container_name: tb-docling
     restart: unless-stopped
     ports: ["5001:5001"]
@@ -174,38 +175,28 @@ services:
     restart: unless-stopped
     environment:
       DOCLING_URL: "http://docling:5001"
-      LLM_ENTITY_BASE_URL: "http://inference-proxy:8080/v1"
+      # smart-parser's own model calls (the messy-spreadsheet agent). It reads the
+      # key from NEBIUS_API_KEY; fastagent.config.yaml points it at the endpoint.
+      LLM_ENTITY_BASE_URL: "${INFERENCE_BASE_URL}"
       LLM_ENTITY_MODEL: "${CHAT_MODEL}"
+      NEBIUS_API_KEY: "${INFERENCE_API_KEY}"
+      INFERENCE_BASE_URL: "${INFERENCE_BASE_URL}"
+      CHAT_MODEL: "${CHAT_MODEL}"
       SMART_PARSER_MCP_PORT: "3200"
+    volumes: ["./fastagent.config.yaml:/app/fastagent.config.yaml:ro"]
     ports: ["3200:3200"]
     depends_on: [docling]
     networks: [tbnet]
 
   # ------------------------------ Knowledge-graph encoder (GLiNER-relex, CPU)
   relex:
-    image: ${TB_REGISTRY}/toolbelt-relex:stable   # x86 image; runs on CPU here
+    image: ${TB_REGISTRY}/toolbelt-relex:${TB_TAG}   # x86 image; runs on CPU here
     container_name: tb-relex
     restart: unless-stopped
     environment:
       DEVICE: "cpu"          # ~1-2 s/doc on CPU (sub-second on a GPU)
       PORT: "8090"
     ports: ["8090:8090"]
-    networks: [tbnet]
-
-  # ------------------------------------------ Hosted models (header proxy)
-  # OpenAI-compatible pass-through to the hosted endpoint. Adds the Cloudflare
-  # Access service-token headers so no other service needs the credentials.
-  # Bound to 127.0.0.1 only (smoke.sh uses it); other containers use it by name.
-  inference-proxy:
-    image: nginx:1.27-alpine
-    container_name: tb-inference-proxy
-    restart: unless-stopped
-    environment:
-      INFERENCE_HOST: "${INFERENCE_HOST}"
-      INFERENCE_CLIENT_ID: "${INFERENCE_CLIENT_ID}"
-      INFERENCE_CLIENT_SECRET: "${INFERENCE_CLIENT_SECRET}"
-    volumes: ["./inference-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro"]
-    ports: ["127.0.0.1:8081:8080"]
     networks: [tbnet]
 
   # -------------------------------------------------------------------- MCP

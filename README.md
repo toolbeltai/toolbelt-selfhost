@@ -7,7 +7,7 @@ Pick the profile that matches your box. The only real difference is **where the 
 | | **[x86-gpu](x86-gpu/)** | **[arm64-gpu](arm64-gpu/)** | **[light](light/)** | **[cpu](cpu/)** |
 |---|---|---|---|---|
 | **Hardware** | x86 box + NVIDIA GPU | ARM64 box + NVIDIA GPU | any CPU box, no GPU | any CPU box, no GPU |
-| **The model** | on the box, on the GPU | on the box, on the GPU | **hosted** — Toolbelt-hosted inference (access token) | **off the box** — any OpenAI-compatible endpoint |
+| **The model** | on the box, on the GPU | on the box, on the GPU | **hosted** — Toolbelt-hosted inference (API key) | **off the box** — any OpenAI-compatible endpoint |
 | **Everything else** | on the box | on the box | on the box | on the box |
 | **Install** | Docker Compose | Docker Compose | Docker Compose | Helm (Kubernetes) |
 | **Examples** | on-prem NVIDIA server; AWS `g5`/`g6`, GCP/Azure GPU VMs | NVIDIA GB10 / DGX Spark, GH200, AWS Graviton + G5g | proofs of concept; any server or cloud VM | any server; model via your vLLM, Nebius, OpenAI, … |

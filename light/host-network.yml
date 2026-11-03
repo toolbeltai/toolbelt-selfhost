@@ -1,0 +1,74 @@
+# Host networking: every service shares the host's network stack.
+# For boxes where containers on a bridge can't reach what the host can, e.g. AWS
+# with an instance-metadata hop limit of 1 (no instance-role S3 credentials on a
+# bridge). Enable it in .env:
+#
+#   COMPOSE_FILE=docker-compose.yml:host-network.yml
+#   KINETICA_URL=http://127.0.0.1:9191      # bundled, or your existing Kinetica
+#
+# Services reach each other on 127.0.0.1. Host ports used: atlas 3080, mcp 3100,
+# auth 8380, smart-parser 3200, docling 5001, relex 8090, cp-db 5433 (127.0.0.1
+# only; 5432 is left for Kinetica's PostgreSQL port), plus Kinetica's own.
+
+x-atlas-host-env: &atlas_host_env
+  PORT: "3080"
+  CP_DATABASE_URL: "postgresql://toolbelt:toolbelt_dev@127.0.0.1:5433/toolbelt_cp"
+  OIDC_ISSUER_URL: "http://127.0.0.1:8380/oauth2"
+  SMART_PARSER_URL: "http://127.0.0.1:3200"
+  GLINER_RELEX_URL: "http://127.0.0.1:8090"
+
+services:
+  kinetica:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+
+  cp-db:
+    network_mode: host
+    networks: !reset []
+    environment: { PGPORT: "5433" }
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5433 -U toolbelt -d toolbelt_cp"]
+
+  auth:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+
+  atlas-seed:
+    network_mode: host
+    networks: !reset []
+    environment: *atlas_host_env
+
+  atlas:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    environment: *atlas_host_env
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/3080' || exit 1"]
+
+  docling:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+
+  smart-parser:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    environment:
+      DOCLING_URL: "http://127.0.0.1:5001"
+
+  relex:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+
+  mcp:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    environment:
+      ATLAS_URL: "http://127.0.0.1:3080"
