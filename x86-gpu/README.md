@@ -69,6 +69,7 @@ extraction instead, set `GLINER_RELEX_URL: ""` in the compose.
 | `setup.sh` | Generates `.env`, verifies GPU access, warms the model, brings it up. |
 | `smoke.sh` | Acceptance test — end-to-end checks (services, login, data, encoder, agent), non-zero exit on failure. |
 | `kinetica-init.sh` | Kinetica first-boot config (external auth + admin). |
+| `../lib/offline-bundle.sh`, `../lib/offline-load.sh` | Package a working install for an offline machine, and load it there. |
 | `start_auth.sh` | OIDC provider entry point. |
 | `.env.example` | Config template: models, `RELEX_DEVICE`, `HOST_IP`. Pin `TB_TAG` to a released image tag. |
 
@@ -176,3 +177,28 @@ change the model in **Admin → Settings** (on a new install, set
    image and model.
 8. **Offline proof:** disconnect the network and run `./smoke.sh` again. It
    must pass with no internet.
+
+### Installing on a machine that is never online
+
+Do steps 1-7 on a connected machine with the same CPU architecture (x86_64),
+then package it:
+
+```sh
+lib/offline-bundle.sh x86-gpu        # from the repo root; writes ~/toolbelt-offline-x86-gpu
+```
+
+That folder holds every image (Ollama and the GPU-check image included), the
+Ollama models volume and the relex encoder cache, a `MANIFEST.txt` and
+checksums: roughly 45-50 GB with the default models. It carries no user data;
+the offline box starts as a fresh install. Copy the folder and this repo to the
+offline machine (prepared with steps 1-6; Docker and the NVIDIA toolkit
+packages have to come across too), then:
+
+```sh
+lib/offline-load.sh ~/toolbelt-offline-x86-gpu   # checks files, loads images, fills the model volumes
+cd x86-gpu && ./setup.sh && ./smoke.sh
+```
+
+`setup.sh` skips models that are already there and `docker compose up` uses
+the loaded images, so neither reaches the internet. Optionally set
+`HF_HUB_OFFLINE=1` in `.env` so relex never even tries huggingface.co.
