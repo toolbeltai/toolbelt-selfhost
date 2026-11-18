@@ -30,7 +30,9 @@ if [ -f .env ]; then
   echo "==> .env already exists — leaving it untouched."
 else
   echo "==> Generating .env (fresh secrets)"
-  HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  # HOST_IP=<address> ./setup.sh uses that address instead of detecting one. It must be an
+  # address both the browser and the containers reach, and it is recorded on first start.
+  HOST_IP="${HOST_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
   [ -n "${HOST_IP:-}" ] || HOST_IP="127.0.0.1"
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out .mcp_priv.pem 2>/dev/null
   openssl pkey -in .mcp_priv.pem -pubout -out .mcp_pub.pem 2>/dev/null
