@@ -41,7 +41,7 @@ else
   rm -f .mcp_priv.pem .mcp_pub.pem
 
   # The encoder goes on the CPU unless the card has room beside the models
-  # (chat + embedder take ~21 GB of VRAM with the default models).
+  # (chat + embedder take ~19 GB of VRAM with the default models, fitted below).
   VRAM_MIB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -dc '0-9')"
   RELEX_DEVICE=cuda
   [ -n "${VRAM_MIB}" ] && [ "${VRAM_MIB}" -lt 30000 ] && RELEX_DEVICE=cpu
@@ -131,6 +131,34 @@ if [ "${LOCAL_OLLAMA:-true}" = true ]; then
       docker exec ollama ollama pull "$m"
     fi
   done
+
+  # Fit both models onto a card under 30 GB (a 20 GB RTX 4000 Ada, a 24 GB A10G).
+  # As pulled they take 21,498 MiB (measured, A10G) and the embedder spills onto the CPU:
+  # - the embedder gets Ollama's long context (40,960 tokens, its maximum), ~3 GB
+  #   of cache for chunks of a few hundred tokens: give it 8,192;
+  # - the chat model's vision projector holds ~1.3 GB of VRAM; Toolbelt sends it
+  #   text only, so drop it.
+  # That brings both to 19,120 MiB, 100% on the GPU. The models keep their names, so
+  # .env and Admin -> Settings don't change. Re-runs skip models already fitted;
+  # a later `ollama pull` of either tag undoes it until setup.sh runs again.
+  VRAM_MIB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -dc '0-9')"
+  if [ -n "${VRAM_MIB}" ] && [ "${VRAM_MIB}" -lt 30000 ]; then
+    unload(){ curl -fsS http://localhost:11434/api/generate -d "{\"model\":\"$1\",\"keep_alive\":0}" >/dev/null 2>&1 || true; }
+    # Captured first: `docker exec … | grep -q` fails under pipefail when grep stops early.
+    emb_params="$(docker exec ollama ollama show --parameters "${SLM_EMBED_MODEL}" 2>/dev/null || true)"
+    chat_info="$(docker exec ollama ollama show "${SLM_CHAT_MODEL}" 2>/dev/null || true)"
+    if ! grep -q '^num_ctx' <<<"${emb_params}"; then
+      echo "   fitting ${SLM_EMBED_MODEL} to this GPU (${VRAM_MIB} MiB): 8,192-token context…"
+      unload "${SLM_EMBED_MODEL}"
+      docker exec ollama sh -c "printf 'FROM %s\nPARAMETER num_ctx 8192\n' '${SLM_EMBED_MODEL}' > /tmp/fit.mf && ollama create '${SLM_EMBED_MODEL}' -f /tmp/fit.mf" >/dev/null
+    fi
+    if grep -q '^  Projector' <<<"${chat_info}"; then
+      echo "   fitting ${SLM_CHAT_MODEL} to this GPU (${VRAM_MIB} MiB): text only, without the vision projector (a minute or two)…"
+      unload "${SLM_CHAT_MODEL}"
+      # The first FROM is the model's weights; the next one is the projector.
+      docker exec ollama sh -c "ollama show --modelfile '${SLM_CHAT_MODEL}' | awk '/^FROM /{n++; if (n>1) next} {print}' > /tmp/fit.mf && ollama create '${SLM_CHAT_MODEL}' -f /tmp/fit.mf" >/dev/null
+    fi
+  fi
 
   # Warm-load both models onto the GPU now, pinned (keep_alive:-1), so the stack
   # comes up against warm models. The default chat model's first load reads ~18 GB into

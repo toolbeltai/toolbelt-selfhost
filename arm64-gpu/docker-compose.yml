@@ -186,6 +186,8 @@ services:
       LLM_ENTITY_BASE_URL: "http://${HOST_IP}:11434/v1"
       LLM_ENTITY_MODEL: "${SLM_CHAT_MODEL}"
       SMART_PARSER_MCP_PORT: "3200"
+      # Atlas sends this on every call; without it smart-parser refuses them all.
+      TOOLBELT_SERVICE_SECRET: "${TOOLBELT_SERVICE_SECRET}"
     ports: ["3200:3200"]
     depends_on: [docling]
     networks: [tbnet]
