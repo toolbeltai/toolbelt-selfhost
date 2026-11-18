@@ -41,6 +41,14 @@ latest release), which `docker compose pull` refreshes. `light` pins a version
 (the default is in `light/.env.example`); `setup.sh` never rewrites your `.env`, so change `TB_TAG` there to move
 to a newer release ([light/README.md](light/README.md#versions-and-upgrading)).
 
+Kinetica now runs with a memory cap (`KINETICA_MEM_LIMIT`; defaults 10g x86-gpu,
+16g light, 32g arm64-gpu) and a pinned build. A `.env` from before keeps
+working with those defaults; if your Kinetica holds a lot of data, set
+`KINETICA_MEM_LIMIT` in `.env` to about 40% of the machine's RAM before
+upgrading ([sizing rule](x86-gpu/README.md#memory-kinetica)). Before rebooting
+the machine, `docker compose stop` in the profile folder so Kinetica shuts down
+cleanly.
+
 Always upgrade with `setup.sh`, not a bare `docker compose up`: it also runs
 one-time data moves. **Installs from before 2026-10-16:** the control-plane
 database was stored in an unnamed Docker volume (a Postgres 18 path mismatch),

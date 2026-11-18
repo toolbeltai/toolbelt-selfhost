@@ -153,6 +153,53 @@ change the model in **Admin → Settings** (on a new install, set
 `SLM_CHAT_MODEL` in `.env` before the first `./setup.sh`). Agent prompts run
 30K+ tokens, so pick a model with a native context of 64K or more.
 
+## Memory (Kinetica)
+
+Kinetica runs with a hard memory cap, `KINETICA_MEM_LIMIT` in `.env` (default
+`10g`, swap included), so a query that runs away restarts Kinetica instead of
+pushing the machine into swap or a hang. Inside the cap, Kinetica keeps table
+data in its RAM tier and needs the rest as working memory for joins, sorts and
+UDFs, which the tier does not limit (on a large install, workers used 11-17 GB
+beyond their tier under load). The rule `kinetica-init.sh` applies:
+
+- RAM tier per rank = a third of `KINETICA_MEM_LIMIT`, split over the 3 ranks
+  (10g gives about 1.1 GiB per rank). `KINETICA_RAM_TIER_LIMIT` (bytes)
+  overrides it; keep the tiers' total well under half the cap.
+- `KINETICA_MEM_LIMIT` about 40% of the machine's RAM: 10g on a 24 GB WSL2 VM,
+  leaving room for docling, relex on the CPU and the part of the chat model
+  Ollama keeps in system RAM.
+
+Data that doesn't fit the RAM tier spills to Kinetica's disk tier, so a small
+tier costs speed, not data. A Kinetica license key goes in `KINETICA_LICENSE_KEY`
+(blank = the free developer edition). These settings live in `.env` and are
+written into the conf file `kinetica-init.sh` generates on every start, so
+re-creating the container keeps them; don't edit `gpudb.conf` inside the
+container. After changing any of them: `docker compose up -d kinetica`.
+
+## Stopping and rebooting
+
+Before rebooting the machine (or `wsl --shutdown` on Windows), stop the stack
+cleanly from the profile folder:
+
+```sh
+docker compose stop
+```
+
+Kinetica gets up to 10 minutes to flush (`stop_grace_period: 600s`); a reboot
+that cuts it off makes the next start slower. Everything starts again on its
+own after the reboot (`restart: unless-stopped`; Ollama too).
+
+## Troubleshooting
+
+- **Workbench (`:8000`) sign-in fails while the app works.** Workbench calls
+  Kinetica by the container's host name. If that name resolves to an IPv6
+  address first (seen on a host install, where it came back as IPv6
+  link-local), sign-in hangs or fails. Check with
+  `docker exec tb-kinetica getent ahosts $(docker exec tb-kinetica hostname)`;
+  the first line should be an IPv4 address. If it isn't, add to the `kinetica`
+  service in `docker-compose.yml`: `hostname: kinetica` and
+  `extra_hosts: ["kinetica:127.0.0.1"]`, then `docker compose up -d kinetica`.
+
 ## Windows 11 (WSL2) and offline
 
 > **Not yet proven end to end.** This path is written from the parts that are
@@ -168,9 +215,11 @@ change the model in **Admin → Settings** (on a new install, set
    [wsl2]
    memory=24GB
    networkingMode=mirrored
+   vmIdleTimeout=-1
    ```
 
-   then `wsl --shutdown` and open Ubuntu again.
+   then `wsl --shutdown` and open Ubuntu again. `vmIdleTimeout=-1` stops WSL
+   shutting the VM down when no window is open.
 3. **Docker Engine inside Ubuntu** (Docker Desktop is not needed):
 
    ```sh
@@ -205,14 +254,23 @@ change the model in **Admin → Settings** (on a new install, set
    address, edit `HOST_IP` in `.env` and run `./setup.sh` again. A DHCP address
    that vanishes when the cable is out breaks sign-in and the model connection
    offline.
-7. **Run it online once:** `./setup.sh` then `./smoke.sh`. This downloads every
+7. **Start with Windows.** Docker starts with Ubuntu because systemd is on
+   (the default for Ubuntu 24.04 under WSL; `systemctl is-active docker` says
+   `active`), and every service restarts on its own (`restart: unless-stopped`).
+   Ubuntu itself only starts when something asks for it, so add a Task
+   Scheduler task that runs at logon (or at startup) with the program `wsl.exe`
+   and the arguments `-d Ubuntu-24.04 --exec true`. After a reboot, check with
+   `wsl -l -v` that Ubuntu is `Running` with every window closed. If it stops
+   again, use the arguments `-d Ubuntu-24.04 --exec dbus-launch true` instead,
+   which leaves a process running that keeps it up.
+8. **Run it online once:** `./setup.sh` then `./smoke.sh`. This downloads every
    image and model.
-8. **Offline proof:** disconnect the network and run `./smoke.sh` again. It
+9. **Offline proof:** disconnect the network and run `./smoke.sh` again. It
    must pass with no internet.
 
 ### Installing on a machine that is never online
 
-Do steps 1-7 on a connected machine with the same CPU architecture (x86_64),
+Do steps 1-8 on a connected machine with the same CPU architecture (x86_64),
 then package it:
 
 ```sh
@@ -223,7 +281,7 @@ That folder holds every image (Ollama and the GPU-check image included), the
 Ollama models volume and the relex encoder cache, a `MANIFEST.txt` and
 checksums: roughly 45-50 GB with the default models. It carries no user data;
 the offline box starts as a fresh install. Copy the folder and this repo to the
-offline machine (prepared with steps 1-6; Docker and the NVIDIA toolkit
+offline machine (prepared with steps 1-7; Docker and the NVIDIA toolkit
 packages have to come across too), then:
 
 ```sh
