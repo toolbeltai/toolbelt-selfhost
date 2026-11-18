@@ -10,10 +10,10 @@ The local language model (Ollama) and the knowledge-graph encoder (relex, CUDA)
 run **on the GPU**; Kinetica runs on CPU (free single-box). Toolbelt images are
 multi-arch — the `linux/amd64` layer is selected automatically on x86.
 
-> **GPU sizing.** The agentic `ask` flow runs several 7B inferences per question,
-> so an **A10G-class GPU or better** is the practical floor for interactive use.
-> A T4 runs the stack fine but is too slow for the agentic path. Anything from an
-> A10G up (A100 / L40S / H100) is comfortable.
+> **GPU sizing.** Default models: chat `gemma4:26b` (Gemma 4 26B-A4B, ~19 GB
+> download) and embeddings `qwen3-embedding:4b` (2560 dims, ~2.5 GB). Together
+> they need about 21 GB of VRAM plus room for a 65,536-token context. See
+> [Sizing](#sizing-the-models) below.
 
 ## Quickstart
 
@@ -24,12 +24,19 @@ git clone https://github.com/toolbeltai/toolbelt-selfhost
 cd toolbelt-selfhost/x86-gpu
 
 ./setup.sh     # writes .env (fresh secrets), verifies container GPU access,
-               # pulls + warms the model on the GPU, and brings the stack up
+               # pulls + warms the models on the GPU, and brings the stack up
 ./smoke.sh     # acceptance test — proves the install end to end
 ```
 
 Open `http://<HOST_IP>:3080` and sign in with **`admin` / `Admin123!`** (change
 it afterward). `setup.sh` prints your `HOST_IP`.
+
+**Pick the models before the first `./setup.sh`.** Atlas records the chat and
+embedding model (`SLM_CHAT_MODEL`, `SLM_EMBED_MODEL`, `SLM_EMBED_DIM` in `.env`)
+on its first start only. After that, change them in **Admin → Settings**.
+Existing installs keep the embedder they started with: vectors from different
+embedders don't mix, so a new embedder means re-embedding your documents. The
+`qwen3-embedding:4b` default is for new installs.
 
 ### On a cloud GPU instance (e.g. AWS)
 
@@ -46,8 +53,8 @@ preinstalled) runs this out of the box — SSH in and follow the Quickstart. Poi
 - **atlas** — control plane / UI + API (`:3080`).
 - **mcp** — agent surface (`:3100`).
 - **docling** + **smart-parser** — document parsing (PDF/OCR/layout) → chunks + entities.
-- **relex** — the GLiNER knowledge-graph encoder, **on the GPU** (CUDA), sub-second/doc.
-- **ollama** — the language model **on the GPU**, OpenAI-compatible.
+- **relex** — the GLiNER knowledge-graph encoder: on the GPU (CUDA, sub-second/doc) or on the CPU (~1-2 s/doc), see `RELEX_DEVICE`.
+- **ollama** — the chat and embedding models **on the GPU**, OpenAI-compatible. Started by `setup.sh` (pinned `ollama/ollama:0.40.16`, 65,536-token context, flash attention, q8_0 KV cache, models kept loaded); models live in the `ollama` volume.
 
 Full data path: SQL, vector search, document ingestion, and an encoder-built
 knowledge graph. Entity + relation extraction is the GLiNER encoder (`relex`),
@@ -63,7 +70,7 @@ extraction instead, set `GLINER_RELEX_URL: ""` in the compose.
 | `smoke.sh` | Acceptance test — end-to-end checks (services, login, data, encoder, agent), non-zero exit on failure. |
 | `kinetica-init.sh` | Kinetica first-boot config (external auth + admin). |
 | `start_auth.sh` | OIDC provider entry point. |
-| `.env.example` | Config template. Pin `TB_TAG` to a released image tag. |
+| `.env.example` | Config template: models, `RELEX_DEVICE`, `HOST_IP`. Pin `TB_TAG` to a released image tag. |
 
 ## Connect an agent
 
@@ -78,9 +85,94 @@ Paste the `tb_` token + URL into your agent's MCP config (Claude Code/Desktop,
 Cursor, …). The agent then has the full Toolbelt tool surface, every call
 answered by the model and data on your box.
 
-## Sizing the model
+## Sizing the models
 
-Swap the chat model by pulling a new tag and setting `SLM_CHAT_MODEL` in `.env`
-(`ollama pull qwen2.5:14b-instruct`, etc.). Fit is bounded by GPU VRAM: a 7B
-model needs ~5–6 GB, so a 24 GB A10G comfortably holds 7B–14B (plus the encoder);
-step up to an A100/L40S/H100 for larger models.
+Download sizes from the Ollama registry: `gemma4:26b` 17.1 GB weights + 1.2 GB
+vision projector + 0.5 GB draft model; `qwen3-embedding:4b` 2.5 GB. Add the
+65,536-token context (flash attention and a q8_0 KV cache keep it small) and
+Ollama's working memory. The relex encoder needs another ~2-3 GB if it runs on
+the GPU.
+
+| GPU memory | What fits |
+|---|---|
+| 48 GB and up (L40S, A100, H100) | Everything on the GPU, encoder included (`RELEX_DEVICE=cuda`). |
+| 24 GB (A10G, L4, RTX 4090) | Chat + embedder on the GPU, just. Encoder on the CPU. |
+| 20 GB (RTX 4000 Ada) | Encoder on the CPU. `gemma4:26b` + the embedder are slightly more than the card holds, so Ollama keeps a few GB of the chat model in system RAM: it works, answers are slower. For everything on the GPU, set `SLM_CHAT_MODEL=gemma4:26b-a4b-it-qat` (14.4 GB weights) before the first `./setup.sh`. |
+
+These figures are worked out from the download sizes; `nvidia-smi` and
+`docker exec ollama ollama ps` show the real split on your box.
+
+### 20 GB GPUs: encoder on CPU
+
+One line in `.env`:
+
+```sh
+RELEX_DEVICE=cpu
+```
+
+then `docker compose up -d relex`. `setup.sh` writes `RELEX_DEVICE=cpu` itself
+when it creates `.env` on a card with less than 30 GB, and `cuda` otherwise.
+On the CPU the encoder takes ~1-2 s per document instead of sub-second, and
+all of the GPU's memory goes to the models.
+
+To use another chat model, pull it (`docker exec ollama ollama pull <tag>`) and
+change the model in **Admin → Settings** (on a new install, set
+`SLM_CHAT_MODEL` in `.env` before the first `./setup.sh`). Agent prompts run
+30K+ tokens, so pick a model with a native context of 64K or more.
+
+## Windows 11 (WSL2) and offline
+
+> **Not yet proven end to end.** This path is written from the parts that are
+> known to work (Docker Engine and NVIDIA GPUs under WSL2); a full install on a
+> Windows 11 PC has not been run yet.
+
+1. **Ubuntu under WSL2.** In an admin PowerShell: `wsl --install -d Ubuntu-24.04`,
+   then reboot.
+2. **Give the VM memory and a real LAN address.** Create
+   `%UserProfile%\.wslconfig`:
+
+   ```ini
+   [wsl2]
+   memory=24GB
+   networkingMode=mirrored
+   ```
+
+   then `wsl --shutdown` and open Ubuntu again.
+3. **Docker Engine inside Ubuntu** (Docker Desktop is not needed):
+
+   ```sh
+   curl -fsSL https://get.docker.com | sh
+   sudo usermod -aG docker $USER     # then close and reopen the Ubuntu window
+   ```
+4. **NVIDIA Container Toolkit.** Install the Windows NVIDIA driver only (WSL
+   brings it into Ubuntu; do not install a Linux driver). In Ubuntu, install
+   `nvidia-container-toolkit` from NVIDIA's apt repository
+   ([guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)),
+   then:
+
+   ```sh
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+   ```
+
+   The last command must print your GPU.
+5. **Clone into the Linux home, not `/mnt/c`** (Windows drives are slow and
+   break file permissions inside containers):
+
+   ```sh
+   cd ~ && git clone https://github.com/toolbeltai/toolbelt-selfhost
+   cd toolbelt-selfhost/x86-gpu
+   ```
+6. **Set `HOST_IP` before the first run.** It must be an address that both the
+   Windows browser and the containers reach, and that still exists when the
+   network cable is unplugged. In practice: give the PC a fixed LAN IP in
+   Windows, and with mirrored networking that same address is the WSL address.
+   `./setup.sh` guesses `HOST_IP` when it writes `.env`; if it picked another
+   address, edit `HOST_IP` in `.env` and run `./setup.sh` again. A DHCP address
+   that vanishes when the cable is out breaks sign-in and the model connection
+   offline.
+7. **Run it online once:** `./setup.sh` then `./smoke.sh`. This downloads every
+   image and model.
+8. **Offline proof:** disconnect the network and run `./smoke.sh` again. It
+   must pass with no internet.

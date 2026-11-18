@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Acceptance test for the GB10 / ARM64 bundle. Proves the running stack works
+# Acceptance test for the x86 + NVIDIA GPU bundle. Proves the running stack works
 # end to end: services healthy, Kinetica round-trip, the local SLM answering,
 # document -> knowledge graph, and the agent (MCP) surface. Exits non-zero on
 # any failure, so it's runnable by hand or in CI. Re-runnable (idempotent).
@@ -38,7 +38,13 @@ done
 echo "== reachability =="
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/auth/config")" = 200 ] && ok "atlas API" || no "atlas API"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$MCP/health")" = 200 ] && ok "mcp health" || no "mcp health"
-curl -s "http://${HOST_IP}:11434/v1/models" | grep -q "${SLM_CHAT_MODEL%%:*}" && ok "SLM present" || no "SLM present"
+curl -s "http://${HOST_IP}:11434/v1/models" | grep -qE "\"${SLM_CHAT_MODEL}(:latest)?\"" && ok "chat model present (${SLM_CHAT_MODEL})" || no "chat model ${SLM_CHAT_MODEL} not in Ollama"
+# The embedder must return vectors of the size atlas was set up with (SLM_EMBED_DIM).
+emb=$(curl -s "http://${HOST_IP}:11434/v1/embeddings" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"${SLM_EMBED_MODEL}\",\"input\":\"hi\"}")
+dim=$(printf '%s' "$emb" | sed -E 's/.*"embedding":\[([^]]*)\].*/\1/' | tr ',' '\n' | grep -c .)
+[ "$dim" = "${SLM_EMBED_DIM}" ] && ok "embedding model (${SLM_EMBED_MODEL}, ${dim} dims)" \
+  || no "embedding model ${SLM_EMBED_MODEL}: ${dim} dims, .env says SLM_EMBED_DIM=${SLM_EMBED_DIM}"
 curl -s http://localhost:8090/health | grep -q '"loaded":true' && ok "KG encoder loaded (relex)" || no "KG encoder (relex)"
 
 echo "== login (real browser flow over HTTP, not the service-secret shortcut) =="

@@ -10,7 +10,7 @@ name: toolbelt-x86gpu
 # gets its instance from the KINETICA_INSTANCES env below (no file plumbing).
 
 networks: { tbnet: {} }
-volumes: { kinetica-persist: {}, cp-db-data: {} }
+volumes: { kinetica-persist: {}, cp-db-data: {}, relex-models: {} }
 
 services:
   # ---------------------------------------------------------------- Kinetica
@@ -156,8 +156,13 @@ services:
     networks: [tbnet]
 
   # ---------------------------------------------- Document parsing (docling)
+  # Toolbelt's build of docling-serve v1.12.0 (the release the Helm chart ships):
+  # layout models AND the chunker tokenizer are baked in and Hugging Face is set
+  # offline, so parsing never reaches the internet. The upstream image fetches
+  # the tokenizer from huggingface.co on the first document. Runs on CPU here,
+  # which leaves the GPU to the models.
   docling:
-    image: quay.io/docling-project/docling-serve:latest
+    image: ghcr.io/toolbeltai/toolbelt/docling-serve:v1.12.0-tb1
     container_name: tb-docling
     restart: unless-stopped
     ports: ["5001:5001"]
@@ -183,8 +188,16 @@ services:
     container_name: tb-relex
     restart: unless-stopped
     environment:
-      DEVICE: "cuda"         # GPU extraction — sub-second/doc (vs ~1-2s on CPU)
+      # cuda = sub-second/doc on the GPU; cpu = ~1-2 s/doc and leaves all VRAM to
+      # the models. setup.sh writes RELEX_DEVICE=cpu on cards under 30 GB.
+      DEVICE: "${RELEX_DEVICE:-cuda}"
       PORT: "8090"
+      # The model is cached in relex-models after the first start; 1 stops it
+      # even trying huggingface.co (optional: it falls back to the cache anyway).
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
+    # The encoder model (~1.8 GB) downloads from huggingface.co on first start;
+    # keeping it in a volume means upgrades and recreates don't fetch it again.
+    volumes: ["relex-models:/root/.cache/huggingface"]
     ports: ["8090:8090"]
     # Reserve an NVIDIA GPU — needs the NVIDIA Container Toolkit on the host.
     deploy:

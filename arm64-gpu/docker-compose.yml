@@ -10,7 +10,7 @@ name: toolbelt-arm
 # gets its instance from the KINETICA_INSTANCES env below (no file plumbing).
 
 networks: { tbnet: {} }
-volumes: { kinetica-persist: {}, cp-db-data: {} }
+volumes: { kinetica-persist: {}, cp-db-data: {}, relex-models: {} }
 
 services:
   # ---------------------------------------------------------------- Kinetica
@@ -157,7 +157,7 @@ services:
 
   # ---------------------------------------------- Document parsing (docling)
   docling:
-    image: quay.io/docling-project/docling-serve:latest
+    image: quay.io/docling-project/docling-serve:v1.12.0   # the docling-serve release the Helm chart ships
     container_name: tb-docling
     restart: unless-stopped
     ports: ["5001:5001"]
@@ -185,6 +185,9 @@ services:
     environment:
       DEVICE: "cpu"          # no arm64 CUDA base yet; CPU extracts ~1-2s/doc
       PORT: "8090"
+    # The encoder model (~1.8 GB) downloads from huggingface.co on first start;
+    # keeping it in a volume means upgrades and recreates don't fetch it again.
+    volumes: ["relex-models:/root/.cache/huggingface"]
     ports: ["8090:8090"]
     networks: [tbnet]
 

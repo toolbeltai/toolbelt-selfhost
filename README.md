@@ -11,7 +11,7 @@ Pick the profile that matches your box. The only real difference is **where the 
 | **Everything else** | on the box | on the box | on the box | on the box |
 | **Install** | Docker Compose | Docker Compose | Docker Compose | Helm (Kubernetes) |
 | **Examples** | on-prem NVIDIA server; AWS `g5`/`g6`, GCP/Azure GPU VMs | NVIDIA GB10 / DGX Spark, GH200, AWS Graviton + G5g | proofs of concept; any server or cloud VM | any server; model via your vLLM, Nebius, OpenAI, … |
-| **Status** | ✅ proven end to end (A10G) | ✅ proven end to end (GB10) | ✅ proven end to end (CPU VM, hosted models) | reference (Helm) |
+| **Status** | ✅ proven end to end (A10G, with the earlier qwen2.5 7B default); Windows 11 / WSL2: not yet proven end to end | ✅ proven end to end (GB10) | ✅ proven end to end (CPU VM, hosted models) | reference (Helm) |
 
 All four give the same Toolbelt.
 
