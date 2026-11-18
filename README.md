@@ -32,8 +32,14 @@ Then open `http://<HOST_IP>:3080` (admin / Admin123!). Full walkthrough: **[x86-
 
 ```sh
 git pull
-./setup.sh      # in your profile's folder: keeps your .env and data, pulls, reconciles
+docker compose pull   # in your profile's folder: fetch the newer images
+./setup.sh            # keeps your .env and data, runs migrations, reconciles
 ```
+
+`TB_TAG` in `.env` picks the release. The GPU profiles default to `stable` (the
+latest release), which `docker compose pull` refreshes. `light` pins a version
+(the default is in `light/.env.example`); `setup.sh` never rewrites your `.env`, so change `TB_TAG` there to move
+to a newer release ([light/README.md](light/README.md#versions-and-upgrading)).
 
 Always upgrade with `setup.sh`, not a bare `docker compose up`: it also runs
 one-time data moves. **Installs from before 2026-10-16:** the control-plane

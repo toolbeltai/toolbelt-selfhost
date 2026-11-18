@@ -50,6 +50,22 @@ Any OpenAI-compatible endpoint that takes a bearer key works: set the URL, key a
 model names. The models are written into atlas on first start; to change them later,
 use the Models page in the UI (or start from a fresh `cp-db` volume).
 
+## Versions and upgrading
+
+`TB_TAG` in `.env` pins the Toolbelt release: a `vX.Y.Z` tag of the images at
+`ghcr.io/toolbeltai/toolbelt` (the default is the one in `.env.example`).
+`setup.sh` never rewrites an existing `.env`, so `git pull` alone does not move you
+to a new release. To upgrade:
+
+```sh
+git pull                              # newer compose file and scripts
+sed -i 's/^TB_TAG=.*/TB_TAG=vX.Y.Z/' .env   # the release you want
+./setup.sh                            # pulls it, runs the database migrations, restarts
+```
+
+Your data (the `cp-db-data` and `kinetica-persist` volumes) is kept. Control-plane
+migrations run on start; there is no separate step.
+
 ## Use an existing Kinetica
 
 Toolbelt talks to Kinetica as a trusted front end: Kinetica must have external
@@ -111,7 +127,7 @@ image yet).
 | `smoke.sh` | Acceptance test, non-zero exit on failure. |
 | `kinetica-init.sh` | Bundled Kinetica first-boot config (external auth + admin). |
 | `start_auth.sh` | OIDC provider entry point. |
-| `.env.example` | Config template. `TB_TAG` pins the release. |
+| `.env.example` | Config template. `TB_TAG` pins the release (see above). |
 
 ## Status
 
