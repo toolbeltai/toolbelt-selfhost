@@ -10,9 +10,10 @@ The local language model (Ollama) and the knowledge-graph encoder (relex, CUDA)
 run **on the GPU**; Kinetica runs on CPU (free single-box). Toolbelt images are
 multi-arch — the `linux/amd64` layer is selected automatically on x86.
 
-> **GPU sizing.** Default models: chat `gemma4:26b` (Gemma 4 26B-A4B, ~19 GB
-> download) and embeddings `qwen3-embedding:4b` (2560 dims, ~2.5 GB). Together
-> they need about 21 GB of VRAM plus room for a 65,536-token context. See
+> **GPU sizing.** Default models: chat `gemma4:26b-a4b-it-qat` (Gemma 4 26B-A4B,
+> quantization-aware 4-bit, 14.4 GB of weights) and embeddings `qwen3-embedding:4b`
+> (2560 dims, ~2.5 GB). Together about 18 GB of VRAM with a 65,536-token context,
+> so they fit a 20 GB card with the encoder on the CPU. See
 > [Sizing](#sizing-the-models) below.
 
 ## Quickstart
@@ -120,8 +121,9 @@ existing server: set `LOCAL_OLLAMA=false` as above, or stop it.
 
 ## Sizing the models
 
-Download sizes from the Ollama registry: `gemma4:26b` 17.1 GB weights + 1.2 GB
-vision projector + 0.5 GB draft model; `qwen3-embedding:4b` 2.5 GB. Add the
+Download sizes from the Ollama registry: `gemma4:26b-a4b-it-qat` (the default) 14.4 GB
+weights; the plain `gemma4:26b` tag is 17.1 GB weights + 1.2 GB vision projector +
+0.5 GB draft model; `qwen3-embedding:4b` 2.5 GB. Add the
 65,536-token context (flash attention and a q8_0 KV cache keep it small) and
 Ollama's working memory. The relex encoder needs another ~2-3 GB if it runs on
 the GPU.
@@ -129,8 +131,8 @@ the GPU.
 | GPU memory | What fits |
 |---|---|
 | 48 GB and up (L40S, A100, H100) | Everything on the GPU, encoder included (`RELEX_DEVICE=cuda`). |
-| 24 GB (A10G, L4, RTX 4090) | Chat + embedder on the GPU, just. Encoder on the CPU. |
-| 20 GB (RTX 4000 Ada) | Encoder on the CPU. `gemma4:26b` + the embedder are slightly more than the card holds, so Ollama keeps a few GB of the chat model in system RAM: it works, answers are slower. For everything on the GPU, set `SLM_CHAT_MODEL=gemma4:26b-a4b-it-qat` (14.4 GB weights) before the first `./setup.sh`. |
+| 24 GB (A10G, L4, RTX 4090) | Chat + embedder on the GPU with room to spare. Encoder on the CPU. |
+| 20 GB (RTX 4000 Ada) | Chat (QAT default) + embedder on the GPU, about 18 GB. Encoder on the CPU (`setup.sh` sets this on cards under 30 GB). Don't switch to the plain `gemma4:26b` tag here: it is larger and spills into system RAM. |
 
 These figures are worked out from the download sizes; `nvidia-smi` and
 `docker exec ollama ollama ps` show the real split on your box.

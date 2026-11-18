@@ -200,7 +200,7 @@ services:
 
   # ------------------------- Knowledge-graph encoder (GLiNER-relex, GPU / CUDA)
   relex:
-    image: ${TB_REGISTRY}/toolbelt-relex:stable   # x86 CUDA build (GPU extraction)
+    image: ${TB_REGISTRY}/toolbelt-relex:${TB_TAG}   # x86 CUDA build; RELEX_DEVICE=cpu runs it on the CPU
     container_name: tb-relex
     restart: unless-stopped
     environment:
