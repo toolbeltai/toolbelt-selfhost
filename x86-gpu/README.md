@@ -86,6 +86,38 @@ Paste the `tb_` token + URL into your agent's MCP config (Claude Code/Desktop,
 Cursor, …). The agent then has the full Toolbelt tool surface, every call
 answered by the model and data on your box.
 
+## Already serving models?
+
+If this PC already runs a model server (Ollama installed on Windows, vLLM,
+LM Studio, ...), point Toolbelt at it instead of starting another Ollama. In
+`.env`, before the first `./setup.sh`:
+
+```sh
+LOCAL_OLLAMA=false                         # setup.sh won't start, pull or warm Ollama
+LLM_BASE_URL=http://${HOST_IP}:11434/v1    # your server's OpenAI-compatible /v1
+LLM_API_KEY=ollama                         # whatever key it wants (Ollama ignores it)
+EMBED_BASE_URL=${LLM_BASE_URL}             # only if embeddings come from another server
+EMBED_API_KEY=${LLM_API_KEY}
+SLM_CHAT_MODEL=<chat model name as your server lists it>
+SLM_EMBED_MODEL=<embedding model name as your server lists it>
+SLM_EMBED_DIM=<that embedding model's vector size>
+```
+
+The server needs:
+
+- an OpenAI-compatible API (`/v1/models`, `/v1/chat/completions`, `/v1/embeddings`);
+- a chat model with tool calling and a context window of at least 64K tokens
+  configured on the server (for Ollama: `OLLAMA_CONTEXT_LENGTH=65536`; its
+  default is far smaller and cuts prompts off without an error);
+- an embedding model, with its dimension in `SLM_EMBED_DIM`;
+- to listen on an address the containers reach: `HOST_IP`, not `127.0.0.1`.
+  An Ollama on Windows listens on 127.0.0.1 unless you set `OLLAMA_HOST=0.0.0.0`
+  in its environment.
+
+`setup.sh` checks that both models are listed, and `./smoke.sh` tests against
+your server. If `setup.sh` stops because port 11434 is taken, that is the
+existing server: set `LOCAL_OLLAMA=false` as above, or stop it.
+
 ## Sizing the models
 
 Download sizes from the Ollama registry: `gemma4:26b` 17.1 GB weights + 1.2 GB

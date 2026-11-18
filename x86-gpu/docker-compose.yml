@@ -1,6 +1,7 @@
 name: toolbelt-x86gpu
 # Toolbelt + Kinetica + a local SLM, whole, on one x86 + NVIDIA GPU box.
-# The local LLM (Ollama) and the KG encoder (relex) run on the GPU.
+# The models (Ollama, started by setup.sh, or a server you already run) and the
+# KG encoder (relex, or on CPU via RELEX_DEVICE) run on the GPU.
 # Toolbelt images are multi-arch; the amd64 layer is used on x86.
 #
 #   ./setup.sh          # writes .env (secrets), enables the GPU, warms the SLM,
@@ -121,14 +122,16 @@ services:
       GLINER_RELEX_URL: "http://relex:8090"
       LLMOPS_API_URL: ""
       BIFROST_URL: ""
-      OLLAMA_URL: "http://${HOST_IP}:11434"
-      SEED_LLM_API_URL: "http://${HOST_IP}:11434/v1"
-      SEED_LLM_API_KEY: "ollama"
+      # Model endpoints: the Ollama container setup.sh starts, or a server you
+      # already run (LOCAL_OLLAMA=false + LLM_BASE_URL in .env). The fallbacks
+      # keep a .env from before these settings working unchanged.
+      SEED_LLM_API_URL: "${LLM_BASE_URL:-http://${HOST_IP}:11434/v1}"
+      SEED_LLM_API_KEY: "${LLM_API_KEY:-ollama}"
       SEED_LLM_MODEL: "${SLM_CHAT_MODEL}"
       SEED_LLM_PROVIDER: "OpenAI"
       SEED_LLM_SOURCE: "external"
-      SEED_EMBEDDING_API_URL: "http://${HOST_IP}:11434/v1"
-      SEED_EMBEDDING_API_KEY: "ollama"
+      SEED_EMBEDDING_API_URL: "${EMBED_BASE_URL:-${LLM_BASE_URL:-http://${HOST_IP}:11434/v1}}"
+      SEED_EMBEDDING_API_KEY: "${EMBED_API_KEY:-${LLM_API_KEY:-ollama}}"
       SEED_EMBEDDING_MODEL: "${SLM_EMBED_MODEL}"
       SEED_EMBEDDING_PROVIDER: "OpenAI"
       SEED_EMBEDDING_SOURCE: "external"
@@ -175,7 +178,7 @@ services:
     restart: unless-stopped
     environment:
       DOCLING_URL: "http://docling:5001"
-      LLM_ENTITY_BASE_URL: "http://${HOST_IP}:11434/v1"
+      LLM_ENTITY_BASE_URL: "${LLM_BASE_URL:-http://${HOST_IP}:11434/v1}"
       LLM_ENTITY_MODEL: "${SLM_CHAT_MODEL}"
       SMART_PARSER_MCP_PORT: "3200"
     ports: ["3200:3200"]

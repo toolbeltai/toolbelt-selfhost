@@ -9,6 +9,9 @@ set -uo pipefail
 cd "$(dirname "$0")"
 [ -f .env ] || { echo "no .env — run ./setup.sh first"; exit 2; }
 set -a; . ./.env; set +a
+# Model endpoints: the local Ollama container, or your own server (LOCAL_OLLAMA=false).
+LLM="${LLM_BASE_URL:-http://${HOST_IP}:11434/v1}"; LKEY="${LLM_API_KEY:-ollama}"
+EMB="${EMBED_BASE_URL:-$LLM}"; EKEY="${EMBED_API_KEY:-$LKEY}"
 
 BASE="http://localhost:3080"; MCP="http://localhost:3100"
 H=(-H "X-Service-Secret: ${TOOLBELT_SERVICE_SECRET}" -H "X-Toolbelt-User: admin" -H "Content-Type: application/json")
@@ -26,7 +29,7 @@ for _ in $(seq 1 30); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$MCP/healt
 # or just-upgraded box); wait for it rather than fail the check below.
 for _ in $(seq 1 90); do curl -s http://localhost:8090/health | grep -q '"loaded":true' && break; sleep 2; done
 echo "   warming the model (first call loads it)…"
-curl -s "http://${HOST_IP}:11434/v1/chat/completions" -H 'Content-Type: application/json' \
+curl -s "${LLM}/chat/completions" -H "Authorization: Bearer ${LKEY}" -H 'Content-Type: application/json' \
   -d "{\"model\":\"${SLM_CHAT_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}" >/dev/null 2>&1 || true
 
 echo "== containers =="
@@ -38,9 +41,9 @@ done
 echo "== reachability =="
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/auth/config")" = 200 ] && ok "atlas API" || no "atlas API"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$MCP/health")" = 200 ] && ok "mcp health" || no "mcp health"
-curl -s "http://${HOST_IP}:11434/v1/models" | grep -qE "\"${SLM_CHAT_MODEL}(:latest)?\"" && ok "chat model present (${SLM_CHAT_MODEL})" || no "chat model ${SLM_CHAT_MODEL} not in Ollama"
+curl -s -H "Authorization: Bearer ${LKEY}" "${LLM}/models" | grep -qE "\"${SLM_CHAT_MODEL}(:latest)?\"" && ok "chat model present (${SLM_CHAT_MODEL})" || no "chat model ${SLM_CHAT_MODEL} not listed at ${LLM}/models"
 # The embedder must return vectors of the size atlas was set up with (SLM_EMBED_DIM).
-emb=$(curl -s "http://${HOST_IP}:11434/v1/embeddings" -H 'Content-Type: application/json' \
+emb=$(curl -s "${EMB}/embeddings" -H "Authorization: Bearer ${EKEY}" -H 'Content-Type: application/json' \
   -d "{\"model\":\"${SLM_EMBED_MODEL}\",\"input\":\"hi\"}")
 dim=$(printf '%s' "$emb" | sed -E 's/.*"embedding":\[([^]]*)\].*/\1/' | tr ',' '\n' | grep -c .)
 [ "$dim" = "${SLM_EMBED_DIM}" ] && ok "embedding model (${SLM_EMBED_MODEL}, ${dim} dims)" \
