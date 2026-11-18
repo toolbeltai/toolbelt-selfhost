@@ -12,12 +12,15 @@ name: toolbelt-light
 # boot; atlas gets its instance from KINETICA_INSTANCES below.
 
 networks: { tbnet: {} }
-volumes: { kinetica-persist: {}, cp-db-data: {} }
+volumes: { kinetica-persist: {}, cp-db-data: {}, relex-models: {} }
 
 services:
   # ---------------------------------------------------------------- Kinetica
   kinetica:
-    image: docker.io/kinetica/kinetica-cpu:7.2.3
+    # Exact build, not the floating 7.2.3 tag, so every install (and an offline
+    # bundle) runs the same Kinetica. The CPU image on GPU boxes too: the CUDA
+    # image preallocates GPU memory the models need.
+    image: docker.io/kinetica/kinetica-cpu:7.2.3.24.20261101191740.ga
     container_name: tb-kinetica
     profiles: [bundled-kinetica]
     restart: unless-stopped
@@ -26,7 +29,17 @@ services:
       GPUDB_START_ALL: "1"
       ACCEPT_LICENSE: "Y"
       TB_HANDSHAKE: "${TB_HANDSHAKE}"
+      KINETICA_LICENSE_KEY: "${KINETICA_LICENSE_KEY:-}"      # blank = developer edition
+      KINETICA_RAM_TIER_LIMIT: "${KINETICA_RAM_TIER_LIMIT:-}" # blank = sized from mem_limit
     entrypoint: ["/bin/bash", "/opt/gpudb/dev/kinetica-init.sh"]
+    # A hard memory cap (no swap): an overrun restarts Kinetica instead of
+    # pushing a swap-less host into a hang. kinetica-init.sh keeps the RAM tier
+    # well under it; see "Memory" in README.md.
+    mem_limit: ${KINETICA_MEM_LIMIT:-16g}
+    memswap_limit: ${KINETICA_MEM_LIMIT:-16g}
+    # Ranks need time to flush on stop; the 10 s default kills them mid-write
+    # and makes the next start slower.
+    stop_grace_period: 600s
     volumes:
       - kinetica-persist:/opt/gpudb/persist
       - ./kinetica-init.sh:/opt/gpudb/dev/kinetica-init.sh:ro
@@ -190,6 +203,9 @@ services:
     environment:
       DEVICE: "cpu"          # ~1-2 s/doc on CPU (sub-second on a GPU)
       PORT: "8090"
+    # The encoder model (~1.8 GB) downloads from huggingface.co on first start;
+    # keeping it in a volume means upgrades and recreates don't fetch it again.
+    volumes: ["relex-models:/root/.cache/huggingface"]
     ports: ["8090:8090"]
     networks: [tbnet]
 

@@ -50,6 +50,22 @@ Any OpenAI-compatible endpoint that takes a bearer key works: set the URL, key a
 model names. The models are written into atlas on first start; to change them later,
 use the Models page in the UI (or start from a fresh `cp-db` volume).
 
+## Versions and upgrading
+
+`TB_TAG` in `.env` pins the Toolbelt release: a `vX.Y.Z` tag of the images at
+`ghcr.io/toolbeltai/toolbelt` (the default is the one in `.env.example`).
+`setup.sh` never rewrites an existing `.env`, so `git pull` alone does not move you
+to a new release. To upgrade:
+
+```sh
+git pull                              # newer compose file and scripts
+sed -i 's/^TB_TAG=.*/TB_TAG=vX.Y.Z/' .env   # the release you want
+./setup.sh                            # pulls it, runs the database migrations, restarts
+```
+
+Your data (the `cp-db-data` and `kinetica-persist` volumes) is kept. Control-plane
+migrations run on start; there is no separate step.
+
 ## Use an existing Kinetica
 
 Toolbelt talks to Kinetica as a trusted front end: Kinetica must have external
@@ -95,9 +111,14 @@ Postgres 5433 (127.0.0.1 only), plus Kinetica's own when bundled. These must be 
 
 ## Requirements
 
-Docker with Compose v2.24 or later, `curl`, `openssl`, `python3`, outbound HTTPS to
-the model endpoint. Disk: ~25 GB for images and data to start. RAM: 32 GB minimum
-(Kinetica + docling + relex), more for larger data; less with an existing Kinetica.
+Docker with Compose v2.24 or later, `curl`, `openssl`, `python3`. Outbound HTTPS to
+the model endpoint, to the image registries (ghcr.io, docker.io, quay.io), and to
+huggingface.co (the knowledge-graph encoder downloads its ~1.8 GB model on first
+start and keeps it in the `relex-models` volume). Disk: ~40 GB free to start (about
+31 GB of images, the encoder model, and your data), plus room for the new images
+when you upgrade. RAM: 32 GB minimum (Kinetica + docling + relex), more for larger
+data; less with an existing Kinetica. Keep the folder on a local disk: Docker
+can't bind-mount the scripts from a root-squashed NFS home directory.
 x86_64; on ARM everything works except the knowledge-graph encoder (relex has no ARM
 image yet).
 
@@ -111,9 +132,11 @@ image yet).
 | `smoke.sh` | Acceptance test, non-zero exit on failure. |
 | `kinetica-init.sh` | Bundled Kinetica first-boot config (external auth + admin). |
 | `start_auth.sh` | OIDC provider entry point. |
-| `.env.example` | Config template. `TB_TAG` pins the release. |
+| `.env.example` | Config template. `TB_TAG` pins the release (see above). |
 
 ## Status
 
-Updated 2026-11-02 for the bearer-key endpoint (the header proxy is gone). Not yet
-proven end to end on a box: run `./smoke.sh`. Host networking is untested on AWS.
+Proven end to end on 2026-11-18 with v0.2.94 on a 12-vCPU, 32 GB x86 VM with no GPU,
+bundled Kinetica, Toolbelt-hosted models: a fresh install passes `smoke.sh` 26/26, and
+an upgrade from v0.2.77 keeps namespaces, tables, documents, the knowledge graph and
+vectors, then passes 26/26. Host networking is untested on AWS.

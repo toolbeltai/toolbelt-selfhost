@@ -7,8 +7,14 @@ NVIDIA GPU**. No Kubernetes, no external model API. Proven end-to-end on an
 **AWS Graviton + G5g**, GH200, and other ARM64 GPU hosts.
 
 Every Toolbelt image here is a native `linux/arm64` build. The control plane
-(atlas + mcp + auth + Postgres) runs in ~450 MiB of RAM; with a 7B model on the
-GPU the whole box sits at ~14 GiB used of 121.
+(atlas + mcp + auth + Postgres) runs in ~450 MiB of RAM; with the earlier 7B
+default model on the GPU the whole box sat at ~14 GiB used of 121.
+
+Default models: chat `gemma4:26b` (Gemma 4 26B-A4B) and embeddings
+`qwen3-embedding:4b` (2560 dims), served by Ollama with a 65,536-token context.
+Set them in `.env` before the first `./setup.sh`: atlas records them on its
+first start only (change later in Admin → Settings; a new embedder means
+re-embedding, so existing installs keep theirs).
 
 ## Quickstart
 
@@ -68,10 +74,11 @@ answered by the model and data on your box.
 
 ## Sizing the model
 
-Swap the chat model by pulling a new tag and setting `SLM_CHAT_MODEL` in `.env`
-(`ollama pull qwen2.5:32b-instruct`, etc.). A GB10's unified memory fits far more
-than 7B — bandwidth, not capacity, is the practical limit, so 7B–32B (or a larger
-MoE) is the interactive sweet spot.
+To use another chat model, pull it (`docker exec ollama ollama pull <tag>`) and
+change it in Admin → Settings. A GB10's unified memory holds far more than the
+default (~21 GB for chat + embedder); bandwidth, not capacity, is the practical
+limit, so a mid-size MoE like Gemma 4 26B-A4B is the interactive sweet spot.
+Agent prompts run 30K+ tokens: pick a model with a native context of 64K or more.
 
 ## Other ARM64 GPU hosts
 

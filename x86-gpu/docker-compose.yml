@@ -1,6 +1,7 @@
 name: toolbelt-x86gpu
 # Toolbelt + Kinetica + a local SLM, whole, on one x86 + NVIDIA GPU box.
-# The local LLM (Ollama) and the KG encoder (relex) run on the GPU.
+# The models (Ollama, started by setup.sh, or a server you already run) and the
+# KG encoder (relex, or on CPU via RELEX_DEVICE) run on the GPU.
 # Toolbelt images are multi-arch; the amd64 layer is used on x86.
 #
 #   ./setup.sh          # writes .env (secrets), enables the GPU, warms the SLM,
@@ -10,12 +11,15 @@ name: toolbelt-x86gpu
 # gets its instance from the KINETICA_INSTANCES env below (no file plumbing).
 
 networks: { tbnet: {} }
-volumes: { kinetica-persist: {}, cp-db-data: {} }
+volumes: { kinetica-persist: {}, cp-db-data: {}, relex-models: {} }
 
 services:
   # ---------------------------------------------------------------- Kinetica
   kinetica:
-    image: docker.io/kinetica/kinetica-cpu:7.2.3
+    # Exact build, not the floating 7.2.3 tag, so every install (and an offline
+    # bundle) runs the same Kinetica. The CPU image on GPU boxes too: the CUDA
+    # image preallocates GPU memory the models need.
+    image: docker.io/kinetica/kinetica-cpu:7.2.3.24.20261101191740.ga
     container_name: tb-kinetica
     restart: unless-stopped
     environment:
@@ -23,7 +27,17 @@ services:
       GPUDB_START_ALL: "1"
       ACCEPT_LICENSE: "Y"
       TB_HANDSHAKE: "${TB_HANDSHAKE}"
+      KINETICA_LICENSE_KEY: "${KINETICA_LICENSE_KEY:-}"      # blank = developer edition
+      KINETICA_RAM_TIER_LIMIT: "${KINETICA_RAM_TIER_LIMIT:-}" # blank = sized from mem_limit
     entrypoint: ["/bin/bash", "/opt/gpudb/dev/kinetica-init.sh"]
+    # A hard memory cap (no swap): an overrun restarts Kinetica instead of
+    # pushing a swap-less host into a hang. kinetica-init.sh keeps the RAM tier
+    # well under it; see "Memory" in README.md.
+    mem_limit: ${KINETICA_MEM_LIMIT:-10g}
+    memswap_limit: ${KINETICA_MEM_LIMIT:-10g}
+    # Ranks need time to flush on stop; the 10 s default kills them mid-write
+    # and makes the next start slower.
+    stop_grace_period: 600s
     volumes:
       - kinetica-persist:/opt/gpudb/persist
       - ./kinetica-init.sh:/opt/gpudb/dev/kinetica-init.sh:ro
@@ -121,14 +135,16 @@ services:
       GLINER_RELEX_URL: "http://relex:8090"
       LLMOPS_API_URL: ""
       BIFROST_URL: ""
-      OLLAMA_URL: "http://${HOST_IP}:11434"
-      SEED_LLM_API_URL: "http://${HOST_IP}:11434/v1"
-      SEED_LLM_API_KEY: "ollama"
+      # Model endpoints: the Ollama container setup.sh starts, or a server you
+      # already run (LOCAL_OLLAMA=false + LLM_BASE_URL in .env). The fallbacks
+      # keep a .env from before these settings working unchanged.
+      SEED_LLM_API_URL: "${LLM_BASE_URL:-http://${HOST_IP}:11434/v1}"
+      SEED_LLM_API_KEY: "${LLM_API_KEY:-ollama}"
       SEED_LLM_MODEL: "${SLM_CHAT_MODEL}"
       SEED_LLM_PROVIDER: "OpenAI"
       SEED_LLM_SOURCE: "external"
-      SEED_EMBEDDING_API_URL: "http://${HOST_IP}:11434/v1"
-      SEED_EMBEDDING_API_KEY: "ollama"
+      SEED_EMBEDDING_API_URL: "${EMBED_BASE_URL:-${LLM_BASE_URL:-http://${HOST_IP}:11434/v1}}"
+      SEED_EMBEDDING_API_KEY: "${EMBED_API_KEY:-${LLM_API_KEY:-ollama}}"
       SEED_EMBEDDING_MODEL: "${SLM_EMBED_MODEL}"
       SEED_EMBEDDING_PROVIDER: "OpenAI"
       SEED_EMBEDDING_SOURCE: "external"
@@ -156,8 +172,13 @@ services:
     networks: [tbnet]
 
   # ---------------------------------------------- Document parsing (docling)
+  # Toolbelt's build of docling-serve v1.12.0 (the release the Helm chart ships):
+  # layout models AND the chunker tokenizer are baked in and Hugging Face is set
+  # offline, so parsing never reaches the internet. The upstream image fetches
+  # the tokenizer from huggingface.co on the first document. Runs on CPU here,
+  # which leaves the GPU to the models.
   docling:
-    image: quay.io/docling-project/docling-serve:latest
+    image: ghcr.io/toolbeltai/toolbelt/docling-serve:v1.12.0-tb1
     container_name: tb-docling
     restart: unless-stopped
     ports: ["5001:5001"]
@@ -170,7 +191,7 @@ services:
     restart: unless-stopped
     environment:
       DOCLING_URL: "http://docling:5001"
-      LLM_ENTITY_BASE_URL: "http://${HOST_IP}:11434/v1"
+      LLM_ENTITY_BASE_URL: "${LLM_BASE_URL:-http://${HOST_IP}:11434/v1}"
       LLM_ENTITY_MODEL: "${SLM_CHAT_MODEL}"
       SMART_PARSER_MCP_PORT: "3200"
     ports: ["3200:3200"]
@@ -179,12 +200,20 @@ services:
 
   # ------------------------- Knowledge-graph encoder (GLiNER-relex, GPU / CUDA)
   relex:
-    image: ${TB_REGISTRY}/toolbelt-relex:stable   # x86 CUDA build (GPU extraction)
+    image: ${TB_REGISTRY}/toolbelt-relex:${TB_TAG}   # x86 CUDA build; RELEX_DEVICE=cpu runs it on the CPU
     container_name: tb-relex
     restart: unless-stopped
     environment:
-      DEVICE: "cuda"         # GPU extraction — sub-second/doc (vs ~1-2s on CPU)
+      # cuda = sub-second/doc on the GPU; cpu = ~1-2 s/doc and leaves all VRAM to
+      # the models. setup.sh writes RELEX_DEVICE=cpu on cards under 30 GB.
+      DEVICE: "${RELEX_DEVICE:-cuda}"
       PORT: "8090"
+      # The model is cached in relex-models after the first start; 1 stops it
+      # even trying huggingface.co (optional: it falls back to the cache anyway).
+      HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-0}"
+    # The encoder model (~1.8 GB) downloads from huggingface.co on first start;
+    # keeping it in a volume means upgrades and recreates don't fetch it again.
+    volumes: ["relex-models:/root/.cache/huggingface"]
     ports: ["8090:8090"]
     # Reserve an NVIDIA GPU — needs the NVIDIA Container Toolkit on the host.
     deploy:
