@@ -252,9 +252,10 @@ own after the reboot (`restart: unless-stopped`; Ollama too).
    Windows browser and the containers reach, and that still exists when the
    network cable is unplugged. In practice: give the PC a fixed LAN IP in
    Windows, and with mirrored networking that same address is the WSL address.
-   `./setup.sh` guesses `HOST_IP` when it writes `.env`; if it picked another
-   address, edit `HOST_IP` in `.env` and run `./setup.sh` again. A DHCP address
-   that vanishes when the cable is out breaks sign-in and the model connection
+   Pass it on the first run: `HOST_IP=<fixed address> ./setup.sh`. Toolbelt
+   records the model address on its first start, so changing `HOST_IP` later
+   also means re-pointing the models in Admin -> Settings. A DHCP address that
+   vanishes when the cable is out breaks sign-in and the model connection
    offline.
 7. **Start with Windows.** Docker starts with Ubuntu because systemd is on
    (the default for Ubuntu 24.04 under WSL; `systemctl is-active docker` says
