@@ -111,9 +111,14 @@ Postgres 5433 (127.0.0.1 only), plus Kinetica's own when bundled. These must be 
 
 ## Requirements
 
-Docker with Compose v2.24 or later, `curl`, `openssl`, `python3`, outbound HTTPS to
-the model endpoint. Disk: ~25 GB for images and data to start. RAM: 32 GB minimum
-(Kinetica + docling + relex), more for larger data; less with an existing Kinetica.
+Docker with Compose v2.24 or later, `curl`, `openssl`, `python3`. Outbound HTTPS to
+the model endpoint, to the image registries (ghcr.io, docker.io, quay.io), and to
+huggingface.co (the knowledge-graph encoder downloads its ~1.8 GB model on first
+start and keeps it in the `relex-models` volume). Disk: ~40 GB free to start (about
+31 GB of images, the encoder model, and your data), plus room for the new images
+when you upgrade. RAM: 32 GB minimum (Kinetica + docling + relex), more for larger
+data; less with an existing Kinetica. Keep the folder on a local disk: Docker
+can't bind-mount the scripts from a root-squashed NFS home directory.
 x86_64; on ARM everything works except the knowledge-graph encoder (relex has no ARM
 image yet).
 
@@ -131,5 +136,7 @@ image yet).
 
 ## Status
 
-Updated 2026-11-02 for the bearer-key endpoint (the header proxy is gone). Not yet
-proven end to end on a box: run `./smoke.sh`. Host networking is untested on AWS.
+Proven end to end on 2026-11-18 with v0.2.94 on a 12-vCPU, 32 GB x86 VM with no GPU,
+bundled Kinetica, Toolbelt-hosted models: a fresh install passes `smoke.sh` 26/26, and
+an upgrade from v0.2.77 keeps namespaces, tables, documents, the knowledge graph and
+vectors, then passes 26/26. Host networking is untested on AWS.

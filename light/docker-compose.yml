@@ -12,7 +12,7 @@ name: toolbelt-light
 # boot; atlas gets its instance from KINETICA_INSTANCES below.
 
 networks: { tbnet: {} }
-volumes: { kinetica-persist: {}, cp-db-data: {} }
+volumes: { kinetica-persist: {}, cp-db-data: {}, relex-models: {} }
 
 services:
   # ---------------------------------------------------------------- Kinetica
@@ -190,6 +190,9 @@ services:
     environment:
       DEVICE: "cpu"          # ~1-2 s/doc on CPU (sub-second on a GPU)
       PORT: "8090"
+    # The encoder model (~1.8 GB) downloads from huggingface.co on first start;
+    # keeping it in a volume means upgrades and recreates don't fetch it again.
+    volumes: ["relex-models:/root/.cache/huggingface"]
     ports: ["8090:8090"]
     networks: [tbnet]
 

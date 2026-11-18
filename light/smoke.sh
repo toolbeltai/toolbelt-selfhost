@@ -28,6 +28,9 @@ no(){ echo "  FAIL  $1"; fail=$((fail+1)); }
 echo "== waiting for the stack to be ready =="
 for _ in $(seq 1 90); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/auth/config")" = 200 ] && break; sleep 2; done
 for _ in $(seq 1 30); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$MCP/health")" = 200 ] && break; sleep 2; done
+# relex loads its model after the container starts (about a minute on a fresh
+# or just-upgraded box); wait for it rather than fail the check below.
+for _ in $(seq 1 90); do curl -s http://localhost:8090/health | grep -q '"loaded":true' && break; sleep 2; done
 
 echo "== containers =="
 CS="tb-cp-db tb-auth tb-atlas tb-mcp tb-docling tb-smart-parser tb-relex"
