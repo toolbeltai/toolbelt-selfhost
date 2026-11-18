@@ -136,7 +136,7 @@ image yet).
 
 ## Status
 
-Proven end to end on 2026-11-18 with v0.2.94 on a 12-vCPU, 32 GB x86 VM with no GPU,
+Proven end to end on 2026-11-18 with v0.2.94 (upgrade to v0.2.95 proven the same day on x86-gpu) on a 12-vCPU, 32 GB x86 VM with no GPU,
 bundled Kinetica, Toolbelt-hosted models: a fresh install passes `smoke.sh` 26/26, and
 an upgrade from v0.2.77 keeps namespaces, tables, documents, the knowledge graph and
 vectors, then passes 26/26. Host networking is untested on AWS.

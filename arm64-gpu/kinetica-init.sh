@@ -57,4 +57,17 @@ if [ ! -f /opt/gpudb/persist/.password_set ]; then
   touch /opt/gpudb/persist/.password_set
 fi
 
-exec /opt/gpudb-docker-start.sh
+# The image's start script ignores SIGTERM (it loops on `sleep 30`), so `docker
+# compose stop` would wait out stop_grace_period and then SIGKILL the ranks
+# mid-write. Run it in the background and stop Kinetica properly on TERM/INT
+# (the ranks flush and shut down in about 30 s).
+stop_kinetica() {
+  echo "kinetica-init: stopping Kinetica cleanly…"
+  /etc/init.d/gpudb stop || true
+  kill "${START_PID}" 2>/dev/null || true
+  exit 0
+}
+trap stop_kinetica TERM INT
+/opt/gpudb-docker-start.sh &
+START_PID=$!
+wait "${START_PID}"

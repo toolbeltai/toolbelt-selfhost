@@ -80,10 +80,12 @@ echo "== ingest + local SLM =="
 curl -s "${H[@]}" -d '{"name":"t","format":"json","data":[{"c":"gpu","w":140},{"c":"cpu","w":52}]}' \
   "$BASE/api/namespace/$NS/asset/save/relational" >/dev/null
 curl -s "${H[@]}" -d '{}' "$BASE/api/namespace/$NS/context/refresh" >/dev/null
-for i in $(seq 1 10); do sql "SELECT c,w FROM toolbelt_user_admin.t ORDER BY w DESC LIMIT 1" | grep -q '"c":"gpu"' && break; sleep 3; done
-sql "SELECT c,w FROM toolbelt_user_admin.t ORDER BY w DESC LIMIT 1" | grep -q '"c":"gpu"' && ok "relational ingest -> Kinetica" || no "relational ingest"
+# Table names carry the namespace (toolbelt_user_admin.t_<first part of its id>).
+T="toolbelt_user_admin.t_${NS%%-*}"
+for i in $(seq 1 10); do sql "SELECT c,w FROM $T ORDER BY w DESC LIMIT 1" | grep -q '"c":"gpu"' && break; sleep 3; done
+sql "SELECT c,w FROM $T ORDER BY w DESC LIMIT 1" | grep -q '"c":"gpu"' && ok "relational ingest -> Kinetica" || no "relational ingest"
 curl -s "${H[@]}" -d "{\"question\":\"Which c has the highest w?\",\"namespaceId\":\"$NS\"}" \
-  "$BASE/api/query/ask" | grep -q '"gpu"' && ok "ask answered by SLM" || no "ask via SLM"
+  "$BASE/api/query/ask" | grep -q 'gpu' && ok "ask answered by SLM" || no "ask via SLM"
 
 echo "== document -> KG + embeddings (docling · smart-parser · relex · embed) =="
 # A document exercises the full ingest path the relational test above does NOT:

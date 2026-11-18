@@ -12,8 +12,10 @@ multi-arch — the `linux/amd64` layer is selected automatically on x86.
 
 > **GPU sizing.** Default models: chat `gemma4:26b-a4b-it-qat` (Gemma 4 26B-A4B,
 > quantization-aware 4-bit, 14.4 GB of weights) and embeddings `qwen3-embedding:4b`
-> (2560 dims, ~2.5 GB). Together about 18 GB of VRAM with a 65,536-token context,
-> so they fit a 20 GB card with the encoder on the CPU. See
+> (2560 dims, 2.5 GB). On cards under 30 GB `setup.sh` fits them to the card
+> (embedder context 8,192, chat model without its unused vision projector):
+> 19,120 MiB of VRAM measured with a 65,536-token chat context, both 100% on
+> the GPU, so they fit a 20 GB card (about 20,470 MiB) with the encoder on the CPU. See
 > [Sizing](#sizing-the-models) below.
 
 ## Quickstart
@@ -131,11 +133,25 @@ the GPU.
 | GPU memory | What fits |
 |---|---|
 | 48 GB and up (L40S, A100, H100) | Everything on the GPU, encoder included (`RELEX_DEVICE=cuda`). |
-| 24 GB (A10G, L4, RTX 4090) | Chat + embedder on the GPU with room to spare. Encoder on the CPU. |
-| 20 GB (RTX 4000 Ada) | Chat (QAT default) + embedder on the GPU, about 18 GB. Encoder on the CPU (`setup.sh` sets this on cards under 30 GB). Don't switch to the plain `gemma4:26b` tag here: it is larger and spills into system RAM. |
+| 24 GB (A10G, L4, RTX 4090) | Chat + embedder on the GPU, 19,120 MiB. Encoder on the CPU. |
+| 20 GB (RTX 4000 Ada) | Chat (QAT default) + embedder on the GPU, 19,120 MiB of about 20,470. Encoder on the CPU (`setup.sh` sets this on cards under 30 GB). Close other programs that use the GPU (games, video editing). Don't switch to the plain `gemma4:26b` tag here: it is larger and spills into system RAM. |
 
-These figures are worked out from the download sizes; `nvidia-smi` and
-`docker exec ollama ollama ps` show the real split on your box.
+Measured on an A10G (`nvidia-smi`, both models loaded, 65,536-token chat context):
+
+| | VRAM | `ollama ps` |
+|---|---|---|
+| As pulled | 21,498 MiB | chat 100% GPU; embedder 29% CPU / 71% GPU (40,960-token context) |
+| After `setup.sh` fits them (cards under 30 GB) | 19,120 MiB | both 100% GPU (chat 15,476 MiB, embedder 3,628 MiB at 8,192 tokens) |
+
+`setup.sh` does the fit once, in place, under the same model names: the
+embedder gets an 8,192-token context (chunks are a few hundred tokens; the
+40,960-token default costs ~3 GB of cache) and the chat model is rebuilt
+without its vision projector (~1.3 GB; Toolbelt sends it text only). Check it
+with `docker exec ollama ollama ps` (`CONTEXT 8192` on the embedder) and
+`docker exec ollama ollama show <chat model>` (no `vision` capability). An
+`ollama pull` of either tag brings back the original; run `./setup.sh` again
+to refit. On Windows the desktop draws on the same card, so keep the PC's
+display on another GPU or expect a few hundred MB less.
 
 ### 20 GB GPUs: encoder on CPU
 
@@ -180,16 +196,23 @@ container. After changing any of them: `docker compose up -d kinetica`.
 
 ## Stopping and rebooting
 
-Before rebooting the machine (or `wsl --shutdown` on Windows), stop the stack
-cleanly from the profile folder:
+A normal reboot is safe: Docker stops every container on the way down
+(Kinetica flushes and stops in about 30 seconds) and starts them all again
+when the machine is back (`restart: unless-stopped`; Ollama too). Proven on
+the A10G box: `sudo reboot` with the stack running, everything back and
+`./smoke.sh` passing about a minute after boot.
+
+On Windows, `wsl --shutdown` or a Windows restart may not give Ubuntu time to
+shut down, so stop Docker first, inside Ubuntu:
 
 ```sh
-docker compose stop
+sudo systemctl stop docker      # stops the containers cleanly; they start again with Ubuntu
 ```
 
-Kinetica gets up to 10 minutes to flush (`stop_grace_period: 600s`); a reboot
-that cuts it off makes the next start slower. Everything starts again on its
-own after the reboot (`restart: unless-stopped`; Ollama too).
+Don't use `docker compose stop` before a reboot: Docker treats containers you
+stopped yourself as meant to stay stopped, so nothing comes back after the
+reboot. If you did, start them again from the profile folder with
+`docker compose start`.
 
 ## Troubleshooting
 
@@ -237,7 +260,7 @@ own after the reboot (`restart: unless-stopped`; Ollama too).
    ```sh
    sudo nvidia-ctk runtime configure --runtime=docker
    sudo systemctl restart docker
-   docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+   docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
    ```
 
    The last command must print your GPU.
