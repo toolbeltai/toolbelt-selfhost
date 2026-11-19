@@ -36,7 +36,7 @@ docker compose pull   # in your profile's folder: fetch the newer images
 ./setup.sh            # keeps your .env and data, runs migrations, reconciles
 ```
 
-`TB_TAG` in `.env` picks the release. `x86-gpu` and `light` pin a version (v0.2.95,
+`TB_TAG` in `.env` picks the release. `x86-gpu` and `light` pin a version (v0.2.96,
 in their `.env.example`), so an install is reproducible and works offline; `arm64-gpu`
 defaults to `stable` (the latest release), which `docker compose pull` refreshes.
 `setup.sh` never rewrites your `.env`, so change `TB_TAG` there to move to a newer
